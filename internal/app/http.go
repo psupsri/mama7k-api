@@ -103,12 +103,14 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-func requestLogger(next http.Handler) http.Handler {
+// requestLogger logs every request with the client IP that rate limits use, which is how to
+// check TRUSTED_PROXY_HOPS after a deploy: it should show your own public IP.
+func (s *Server) requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		slog.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ms", time.Since(start).Milliseconds())
+		slog.Info("http", "method", r.Method, "path", r.URL.Path, "status", rec.status, "ms", time.Since(start).Milliseconds(), "ip", s.clientIP(r))
 	})
 }
 
@@ -150,17 +152,6 @@ func requireUser(r *http.Request) (*User, error) {
 		return u, nil
 	}
 	return nil, errUnauthenticated()
-}
-
-func requireVerified(r *http.Request) (*User, error) {
-	u, err := requireUser(r)
-	if err != nil {
-		return nil, err
-	}
-	if !u.EmailVerified {
-		return nil, &Error{http.StatusForbidden, "EMAIL_NOT_VERIFIED", "กรุณายืนยันอีเมลก่อน"}
-	}
-	return u, nil
 }
 
 func requireAdmin(r *http.Request, superOnly bool) (*User, error) {

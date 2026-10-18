@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -25,7 +24,7 @@ func (s *Server) adminListUsers(w http.ResponseWriter, r *http.Request) error {
 	}
 	q := "%" + strings.TrimSpace(r.URL.Query().Get("q")) + "%"
 	rows, err := s.db.Query(r.Context(), `SELECT `+userColumns+` FROM users
-		WHERE deleted_at IS NULL AND (email ILIKE $1 OR display_name ILIKE $1) ORDER BY created_at LIMIT 200`, q)
+		WHERE deleted_at IS NULL AND (username ILIKE $1 OR display_name ILIKE $1) ORDER BY created_at LIMIT 200`, q)
 	if err != nil {
 		return err
 	}
@@ -80,7 +79,7 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) error {
 			if *in.Suspended {
 				action = "USER_SUSPEND"
 			}
-			if err := audit(ctx, tx, me.ID, action, target.DisplayName+" ("+target.Email+")"); err != nil {
+			if err := audit(ctx, tx, me.ID, action, target.DisplayName+" (@"+target.Username+")"); err != nil {
 				return err
 			}
 		}
@@ -108,6 +107,42 @@ func (s *Server) adminUpdateUser(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return ok(w, u)
+}
+
+// POST /api/admin/users/{id}/reset-password — Super Admin only. The site sends no email, so a
+// user who forgot their password asks staff, who give them the temporary password returned
+// here. Their sessions end and they must choose a new password after signing in.
+func (s *Server) adminResetPassword(w http.ResponseWriter, r *http.Request) error {
+	me, err := requireAdmin(r, true)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
+	target, err := scanUser(s.db.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1::uuid AND deleted_at IS NULL`, r.PathValue("id")))
+	if err != nil {
+		return errNotFound("ไม่พบผู้ใช้")
+	}
+	if target.ID == me.ID {
+		return errValidation("เปลี่ยนรหัสผ่านของตัวเองที่หน้าโปรไฟล์")
+	}
+	pw := newTemporaryPassword()
+	hash, err := hashPassword(pw)
+	if err != nil {
+		return err
+	}
+	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1`, target.ID, hash); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1`, target.ID); err != nil {
+			return err
+		}
+		return audit(ctx, tx, me.ID, "USER_PASSWORD_RESET", target.DisplayName+" (@"+target.Username+")")
+	})
+	if err != nil {
+		return err
+	}
+	return ok(w, map[string]string{"temporaryPassword": pw})
 }
 
 // ---------- public builds (staff never see group or private builds) ----------
@@ -591,15 +626,12 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 	if !exists {
 		return errNotFound("ไม่พบรายการ")
 	}
-	dst := filepath.Join(s.cfg.UploadDir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
+	stored, err := s.images.Put(ctx, rel, http.DetectContentType(data), data)
+	if err != nil {
 		return err
 	}
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET image_path = $2, updated_at = now() WHERE id = $1`, itemID, "/media/"+rel); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET image_path = $2, updated_at = now() WHERE id = $1`, itemID, stored); err != nil {
 			return err
 		}
 		return audit(ctx, tx, me.ID, "MASTER_IMAGE", entity+"/"+itemID)
@@ -607,7 +639,7 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	return ok(w, map[string]string{"image": "/media/" + rel})
+	return ok(w, map[string]any{"image": imageURL(&stored)})
 }
 
 // ---------- CSV import (FR 9.3) ----------

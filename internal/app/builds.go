@@ -206,7 +206,7 @@ func (s *Server) buildDetail(ctx context.Context, u *User, id string) (*BuildDet
 			return nil, err
 		}
 		d.CanEdit = d.IsMine && !b.CreatorDeleted
-		d.CanVote = u.EmailVerified
+		d.CanVote = true
 	}
 	return d, nil
 }
@@ -307,7 +307,7 @@ func (s *Server) getBuild(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) createBuild(w http.ResponseWriter, r *http.Request) error {
-	u, err := requireVerified(r)
+	u, err := requireUser(r)
 	if err != nil {
 		return err
 	}
@@ -351,7 +351,7 @@ func (s *Server) createBuild(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) updateBuild(w http.ResponseWriter, r *http.Request) error {
-	u, err := requireVerified(r)
+	u, err := requireUser(r)
 	if err != nil {
 		return err
 	}
@@ -432,7 +432,7 @@ func (s *Server) deleteBuild(w http.ResponseWriter, r *http.Request) error {
 // PUT /api/builds/{id}/vote — creates or replaces the viewer's single vote. The UI asks for
 // confirmation before replacing; the API simply upserts.
 func (s *Server) castVote(w http.ResponseWriter, r *http.Request) error {
-	u, err := requireVerified(r)
+	u, err := requireUser(r)
 	if err != nil {
 		return err
 	}

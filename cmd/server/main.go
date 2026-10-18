@@ -40,7 +40,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           app.NewServer(cfg, pool, app.LogMailer{}).Handler(),
+		Handler:           app.NewServer(cfg, pool).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

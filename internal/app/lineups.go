@@ -159,7 +159,7 @@ func (s *Server) getLineup(w http.ResponseWriter, r *http.Request) error {
 
 // POST /api/lineups — creates a lineup, or returns the existing one if it is a duplicate.
 func (s *Server) createLineup(w http.ResponseWriter, r *http.Request) error {
-	u, err := requireVerified(r)
+	u, err := requireUser(r)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,6 @@
 package app
 
 import (
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,31 +10,24 @@ import (
 	"mama7k/api/internal/config"
 )
 
-// Mailer sends transactional email (verification, password reset).
-type Mailer interface {
-	Send(to, subject, body string) error
-}
-
-// LogMailer writes emails to the log; used in development and tests.
-type LogMailer struct{}
-
-func (LogMailer) Send(to, subject, body string) error {
-	slog.Info("email", "to", to, "subject", subject, "body", body)
-	return nil
-}
-
 type Server struct {
 	cfg    config.Config
 	db     *pgxpool.Pool
-	mailer Mailer
+	images ImageStore
+	limits rateLimits
 	now    func() time.Time
 }
 
-func NewServer(cfg config.Config, db *pgxpool.Pool, mailer Mailer) *Server {
+func NewServer(cfg config.Config, db *pgxpool.Pool) *Server {
 	if cfg.MediaBaseURL != "" {
 		mediaBaseURL = cfg.MediaBaseURL
 	}
-	return &Server{cfg: cfg, db: db, mailer: mailer, now: time.Now}
+	var images ImageStore = LocalImageStore{Dir: cfg.UploadDir}
+	if cfg.R2Enabled() {
+		images = R2ImageStore{AccountID: cfg.R2AccountID, AccessKeyID: cfg.R2AccessKeyID, SecretAccessKey: cfg.R2SecretAccessKey,
+			Bucket: cfg.R2Bucket, Prefix: cfg.R2UploadPrefix}
+	}
+	return &Server{cfg: cfg, db: db, images: images, limits: defaultRateLimits(), now: time.Now}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -50,13 +42,10 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/auth/register", s.register)
 	h("POST /api/auth/login", s.login)
 	h("POST /api/auth/logout", s.logout)
-	h("POST /api/auth/verify-email", s.verifyEmail)
-	h("POST /api/auth/resend-verification", s.resendVerification)
-	h("POST /api/auth/password-reset", s.requestPasswordReset)
-	h("POST /api/auth/password-reset/confirm", s.confirmPasswordReset)
 	h("GET /api/me", s.me)
 	h("PATCH /api/me", s.updateProfile)
 	h("DELETE /api/me", s.deleteAccount)
+	h("POST /api/me/password", s.changePassword)
 
 	// Master data (FR 9)
 	h("GET /api/master", s.getMaster)
@@ -92,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 	// Admin (FR 8–9)
 	h("GET /api/admin/users", s.adminListUsers)
 	h("PATCH /api/admin/users/{id}", s.adminUpdateUser)
+	h("POST /api/admin/users/{id}/reset-password", s.adminResetPassword)
 	h("GET /api/admin/builds", s.adminListPublicBuilds)
 	h("PATCH /api/admin/builds/{id}", s.adminSetBuildHidden)
 	h("DELETE /api/admin/builds/{id}", s.adminDeleteBuild)
@@ -108,6 +98,10 @@ func (s *Server) Handler() http.Handler {
 	h("GET /api/admin/audit", s.adminAuditLog)
 
 	mux.Handle("GET /media/", http.StripPrefix("/media/", http.FileServer(http.Dir(s.cfg.UploadDir))))
+	mux.Handle("GET /api/", s.wrap(func(http.ResponseWriter, *http.Request) error { return errNotFound("ไม่พบ API นี้") }))
+	if s.cfg.WebDir != "" {
+		mux.Handle("GET /", webApp(s.cfg.WebDir))
+	}
 
-	return recoverer(requestLogger(csrfGuard(s.sessionMiddleware(mux))))
+	return recoverer(s.requestLogger(s.rateLimit(csrfGuard(s.sessionMiddleware(mux)))))
 }

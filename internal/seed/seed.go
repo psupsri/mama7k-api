@@ -34,7 +34,7 @@ func ResetAccounts(ctx context.Context, pool *pgxpool.Pool) error { return reset
 func reset(ctx context.Context, pool *pgxpool.Pool, sample bool) error {
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `TRUNCATE audit_log, votes, build_shares, builds, lineup_placements, lineups,
-			group_members, groups, email_tokens, sessions, users, stat_types, rings, equipment_sets, pets, characters
+			group_members, groups, sessions, users, stat_types, rings, equipment_sets, pets, characters
 			RESTART IDENTITY CASCADE`); err != nil {
 			return err
 		}
@@ -145,17 +145,17 @@ func load(ctx context.Context, tx pgx.Tx, sample bool) error {
 		return err
 	}
 	for i, u := range []struct {
-		email, name, role string
-		suspended         bool
+		username, name, role string
+		suspended            bool
 	}{
-		{"pisit@example.com", "Pisit", "SUPER_ADMIN", false},
-		{"mee@example.com", "หมีน้อย", "USER", false},
-		{"shadow@example.com", "ShadowBlade", "MODERATOR", false},
-		{"fah@example.com", "สายฟ้า", "USER", false},
-		{"banned@example.com", "โดนแบน", "USER", true},
+		{"pisit", "Pisit", "SUPER_ADMIN", false},
+		{"mee", "หมีน้อย", "USER", false},
+		{"shadow", "ShadowBlade", "MODERATOR", false},
+		{"fah", "สายฟ้า", "USER", false},
+		{"banned", "โดนแบน", "USER", true},
 	} {
-		if err := exec(`INSERT INTO users (id, email, password_hash, display_name, role, suspended, email_verified_at)
-			VALUES ($1, $2, $3, $4, $5, $6, now())`, UserID(i+1), u.email, string(hash), u.name, u.role, u.suspended); err != nil {
+		if err := exec(`INSERT INTO users (id, username, password_hash, display_name, role, suspended)
+			VALUES ($1, $2, $3, $4, $5, $6)`, UserID(i+1), u.username, string(hash), u.name, u.role, u.suspended); err != nil {
 			return err
 		}
 	}

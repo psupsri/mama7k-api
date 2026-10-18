@@ -13,13 +13,13 @@ const (
 )
 
 type User struct {
-	ID            string `json:"id"`
-	Email         string `json:"email"`
-	DisplayName   string `json:"displayName"`
-	Role          Role   `json:"role"`
-	Suspended     bool   `json:"suspended"`
-	Deleted       bool   `json:"deleted"`
-	EmailVerified bool   `json:"emailVerified"`
+	ID                 string `json:"id"`
+	Username           string `json:"username"`
+	DisplayName        string `json:"displayName"`
+	Role               Role   `json:"role"`
+	Suspended          bool   `json:"suspended"`
+	Deleted            bool   `json:"deleted"`
+	MustChangePassword bool   `json:"mustChangePassword"` // set by a staff password reset
 }
 
 // ---------- master data ----------

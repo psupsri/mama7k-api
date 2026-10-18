@@ -36,3 +36,15 @@ func TestSessionTTL(t *testing.T) {
 		t.Fatalf("SessionTTL = %s", got)
 	}
 }
+
+func TestPortFromHost(t *testing.T) {
+	t.Setenv("ADDR", "")
+	t.Setenv("PORT", "10000")
+	if got := Load().Addr; got != ":10000" {
+		t.Fatalf("Addr = %q", got)
+	}
+	t.Setenv("ADDR", ":7000") // explicit ADDR wins
+	if got := Load().Addr; got != ":7000" {
+		t.Fatalf("Addr = %q", got)
+	}
+}

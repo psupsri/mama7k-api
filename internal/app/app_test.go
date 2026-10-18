@@ -60,8 +60,8 @@ func setup(t *testing.T) *env {
 	if err := seed.Reset(context.Background(), pool); err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{SessionTTL: time.Hour, UploadDir: t.TempDir(), BaseURL: "http://test"}
-	srv := httptest.NewServer(app.NewServer(cfg, pool, app.LogMailer{}).Handler())
+	cfg := config.Config{SessionTTL: time.Hour, UploadDir: t.TempDir()}
+	srv := httptest.NewServer(app.NewServer(cfg, pool).Handler())
 	t.Cleanup(srv.Close)
 	return &env{t: t, srv: srv}
 }
@@ -91,6 +91,7 @@ func (e *env) as(n int) *client {
 type resp struct {
 	status int
 	body   []byte
+	cookie string // session cookie set by the response, if any
 }
 
 func (r resp) json(t *testing.T, v any) {
@@ -126,7 +127,13 @@ func (c *client) do(method, path string, body any) resp {
 	}
 	defer res.Body.Close()
 	b, _ := io.ReadAll(res.Body)
-	return resp{res.StatusCode, b}
+	out := resp{status: res.StatusCode, body: b}
+	for _, ck := range res.Cookies() {
+		if ck.Name == "mama7k_session" {
+			out.cookie = ck.Value
+		}
+	}
+	return out
 }
 
 func (c *client) expect(status int, method, path string, body any) resp {
@@ -490,26 +497,81 @@ func TestAccountDeletion(t *testing.T) {
 
 func TestSuspendedUserCannotLogIn(t *testing.T) {
 	e := setup(t)
-	r := e.guest().expect(403, "POST", "/api/auth/login", map[string]string{"email": "banned@example.com", "password": seed.Password})
+	r := e.guest().expect(403, "POST", "/api/auth/login", map[string]string{"username": "banned", "password": seed.Password})
 	eq(t, r.errCode(t), "SUSPENDED")
 }
 
 func TestRegisterLoginLogout(t *testing.T) {
 	e := setup(t)
-	reg := e.guest().do("POST", "/api/auth/register", map[string]string{"email": "new@example.com", "password": "longenough", "displayName": "มือใหม่"})
+	reg := e.guest().do("POST", "/api/auth/register", map[string]string{"username": "newbie_01", "password": "longenough", "displayName": "มือใหม่"})
 	eq(t, reg.status, 200)
-	e.guest().expect(409, "POST", "/api/auth/register", map[string]string{"email": "NEW@example.com", "password": "longenough", "displayName": "x"})
-	e.guest().expect(401, "POST", "/api/auth/login", map[string]string{"email": "new@example.com", "password": "wrong-password"})
-	e.guest().expect(200, "POST", "/api/auth/login", map[string]string{"email": "new@example.com", "password": "longenough"})
+	e.guest().expect(409, "POST", "/api/auth/register", map[string]string{"username": "NEWBIE_01", "password": "longenough", "displayName": "x"})
+	e.guest().expect(401, "POST", "/api/auth/login", map[string]string{"username": "newbie_01", "password": "wrong-password"})
+	e.guest().expect(200, "POST", "/api/auth/login", map[string]string{"username": " Newbie_01 ", "password": "longenough"})
 }
 
-func TestUnverifiedUserCannotCreate(t *testing.T) {
+func TestLoginIsRateLimitedPerIP(t *testing.T) {
 	e := setup(t)
-	if _, err := pool.Exec(context.Background(), `UPDATE users SET email_verified_at = NULL WHERE id = $1`, seed.UserID(4)); err != nil {
-		t.Fatal(err)
+	bad := map[string]string{"username": "mee", "password": "wrong-password"}
+	for range 10 {
+		e.guest().expect(401, "POST", "/api/auth/login", bad)
 	}
-	r := e.as(4).expect(403, "PUT", "/api/builds/"+seed.BuildID(1)+"/vote", map[string]string{"result": "WIN", "equipLevel": "EXACT_EQUIPMENT"})
-	eq(t, r.errCode(t), "EMAIL_NOT_VERIFIED")
+	r := e.guest().expect(429, "POST", "/api/auth/login", map[string]string{"username": "mee", "password": seed.Password})
+	eq(t, r.errCode(t), "RATE_LIMITED")
+	e.guest().expect(200, "GET", "/api/master", nil) // reads are not limited
+}
+
+func TestUsernameRule(t *testing.T) {
+	e := setup(t)
+	for _, name := range []string{"ab", "has space", "ไทย", "dot.name", "this_name_is_way_too_long"} {
+		r := e.guest().expect(400, "POST", "/api/auth/register", map[string]string{"username": name, "password": "longenough", "displayName": "x"})
+		eq(t, r.errCode(t), "VALIDATION")
+	}
+}
+
+func TestNewUserCanCreateRightAway(t *testing.T) {
+	e := setup(t)
+	reg := e.guest().do("POST", "/api/auth/register", map[string]string{"username": "fresh", "password": "longenough", "displayName": "สด"})
+	eq(t, reg.status, 200)
+	c := &client{e: e, token: reg.cookie}
+	c.expect(200, "PUT", "/api/builds/"+seed.BuildID(1)+"/vote", map[string]string{"result": "WIN", "equipLevel": "EXACT_EQUIPMENT"})
+}
+
+func TestChangePasswordKeepsThisSessionOnly(t *testing.T) {
+	e := setup(t)
+	login := func(pw string) resp {
+		return e.guest().do("POST", "/api/auth/login", map[string]string{"username": "mee", "password": pw})
+	}
+	first := &client{e: e, token: login(seed.Password).cookie}
+	other := &client{e: e, token: login(seed.Password).cookie}
+	r := first.expect(400, "POST", "/api/me/password", map[string]string{"currentPassword": "wrong-one", "newPassword": "brand-new-pw"})
+	eq(t, r.errCode(t), "VALIDATION")
+	first.expect(200, "POST", "/api/me/password", map[string]string{"currentPassword": seed.Password, "newPassword": "brand-new-pw"})
+	first.expect(200, "GET", "/api/builds/"+seed.BuildID(2), nil) // still signed in (b2 is a group build)
+	if got := strings.TrimSpace(string(other.do("GET", "/api/me", nil).body)); got != "null" {
+		t.Fatalf("other session still signed in: %s", got)
+	}
+	eq(t, login(seed.Password).status, 401)
+	eq(t, login("brand-new-pw").status, 200)
+}
+
+func TestSuperAdminResetsPassword(t *testing.T) {
+	e := setup(t)
+	victim := e.as(2)
+	e.as(3).expect(403, "POST", "/api/admin/users/"+seed.UserID(2)+"/reset-password", map[string]any{}) // moderator
+	var out struct{ TemporaryPassword string }
+	e.as(1).expect(200, "POST", "/api/admin/users/"+seed.UserID(2)+"/reset-password", map[string]any{}).json(t, &out)
+	if got := strings.TrimSpace(string(victim.do("GET", "/api/me", nil).body)); got != "null" {
+		t.Fatalf("old session survived the reset: %s", got)
+	}
+	r := e.guest().expect(200, "POST", "/api/auth/login", map[string]string{"username": "mee", "password": out.TemporaryPassword})
+	var me struct{ MustChangePassword bool }
+	r.json(t, &me)
+	eq(t, me.MustChangePassword, true)
+	c := &client{e: e, token: r.cookie}
+	var after struct{ MustChangePassword bool }
+	c.expect(200, "POST", "/api/me/password", map[string]string{"currentPassword": out.TemporaryPassword, "newPassword": "my-own-password"}).json(t, &after)
+	eq(t, after.MustChangePassword, false)
 }
 
 func TestGuestCannotWrite(t *testing.T) {
@@ -638,4 +700,38 @@ func TestListLineupsWithoutFilterReturnsAll(t *testing.T) {
 	eq(t, len(all), 4)
 	e.guest().expect(200, "GET", "/api/lineups?characters="+seed.Char("lubu")+","+seed.Char("soran"), nil).json(t, &some)
 	eq(t, len(some), 1)
+}
+
+func TestServesWebAppWithClientRoutes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(dir+"/assets", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(dir+"/index.html", []byte("<html>app</html>"), 0o644)
+	_ = os.WriteFile(dir+"/assets/app-123.js", []byte("console.log(1)"), 0o644)
+	srv := httptest.NewServer(app.NewServer(config.Config{SessionTTL: time.Hour, UploadDir: t.TempDir(), WebDir: dir}, pool).Handler())
+	t.Cleanup(srv.Close)
+	get := func(path string) (int, string, http.Header) {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b), res.Header
+	}
+	for _, p := range []string{"/", "/lineups/abc", "/admin/master"} {
+		if code, body, h := get(p); code != 200 || body != "<html>app</html>" || h.Get("Cache-Control") != "no-cache" {
+			t.Fatalf("%s: %d %q %q", p, code, body, h.Get("Cache-Control"))
+		}
+	}
+	if code, body, h := get("/assets/app-123.js"); code != 200 || body != "console.log(1)" || !strings.Contains(h.Get("Cache-Control"), "immutable") {
+		t.Fatalf("asset: %d %q %q", code, body, h.Get("Cache-Control"))
+	}
+	if code, body, _ := get("/api/nope"); code != 404 || !strings.Contains(body, "NOT_FOUND") {
+		t.Fatalf("unknown API path: %d %s", code, body)
+	}
+	if code, _, _ := get("/api/health"); code != 200 {
+		t.Fatalf("health: %d", code)
+	}
 }

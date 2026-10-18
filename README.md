@@ -11,17 +11,22 @@ go run ./cmd/seed                # reset dev DB: sample users + groups (password
 go run ./cmd/seed -sample        # ...plus sample game data (master data, lineups, builds, votes)
 go run ./cmd/server              # http://localhost:8787, applies migrations on start
 go test ./...                    # integration tests against mama7k_test
-go run ./cmd/useradmin -email you@example.com -name "Name" -role MODERATOR   # create staff / change role
+go run ./cmd/useradmin -username you -name "Name" -role SUPER_ADMIN   # create staff / change role
 ```
 
 Configuration: copy `.env.example` to `.env` (git-ignored); every setting is listed there with its local default —
-`DATABASE_URL`, `ADDR`, `BASE_URL`, `COOKIE_SECURE`, `SESSION_TTL`, `MEDIA_PUBLIC_URL`, `UPLOAD_DIR`. Real environment
-variables win over `.env`. Tests use `TEST_DATABASE_URL` (default: the `mama7k_test` database).
+`DATABASE_URL`, `ADDR`/`PORT`, `COOKIE_SECURE`, `SESSION_TTL`, `MEDIA_PUBLIC_URL`, `UPLOAD_DIR`, and for production
+`WEB_DIR`, `TRUSTED_PROXY_HOPS`, `R2_*`. Real environment variables win over `.env`. Tests use `TEST_DATABASE_URL`
+(default: the `mama7k_test` database). Deploying: see [`../docs/deploy.md`](../docs/deploy.md).
 
 ## Design notes
 
-- **Auth:** httpOnly `SameSite=Lax` session cookie; only the sha256 of the token is stored. Suspending a user or resetting a
-  password deletes their sessions. State-changing requests must be `application/json` (CSRF guard).
+- **Auth:** username + password; the site sends no email. httpOnly `SameSite=Lax` session cookie; only the sha256 of the
+  token is stored. A forgotten password is reset by a Super Admin, who gets a temporary password to pass on; the user
+  must choose a new one after signing in (`mustChangePassword`). Suspending a user or resetting a password deletes their
+  sessions. State-changing requests must be `application/json` (CSRF guard).
+- **Rate limits** (per client IP, in memory): login 10 / 5 min, register 5 / hour, other writes 120 / min → 429
+  `RATE_LIMITED`.
 - **Access rule (FR 4.6):** one SQL predicate, `visibleSQL` in `internal/app/builds_read.go`, used by every build read.
   Inaccessible builds return the same 404 as missing ones.
 - **Builds:** sharing, votes and enemy pets are relational; the team (placements, pets, skill order, speed,
@@ -36,15 +41,15 @@ variables win over `.env`. Tests use `TEST_DATABASE_URL` (default: the `mama7k_t
 
 | Area | Method & path |
 | --- | --- |
-| Auth | `POST /api/auth/register`, `/login`, `/logout`, `/verify-email`, `/resend-verification`, `/password-reset`, `/password-reset/confirm` |
-| Profile | `GET /api/me` (null for guests), `PATCH /api/me`, `DELETE /api/me` |
+| Auth | `POST /api/auth/register`, `/login`, `/logout` (`{"username", "password"}`) |
+| Profile | `GET /api/me` (null for guests), `PATCH /api/me`, `DELETE /api/me`, `POST /api/me/password` |
 | Master data | `GET /api/master` |
 | Lineups | `GET /api/lineups?characters=a,b`, `POST /api/lineups`, `GET /api/lineups/{id}`, `GET /api/lineups/{id}/builds?enemyPet=&sort=WIN14\|VOTES\|NEWEST` |
 | Builds | `GET /api/me/builds`, `POST /api/builds`, `GET /api/builds/{id}`, `PUT /api/builds/{id}`, `DELETE /api/builds/{id}` |
 | Votes | `PUT /api/builds/{id}/vote`, `DELETE /api/builds/{id}/vote` |
 | Groups | `GET /api/groups`, `POST /api/groups`, `POST /api/groups/join`, `GET\|PATCH\|DELETE /api/groups/{id}`, `POST /api/groups/{id}/leave`, `/transfer`, `/invite-code`, `DELETE /api/groups/{id}/members/{userId}`, `PUT /api/groups/{id}/builds/{buildId}/hidden` |
-| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/{id}`, `GET /api/admin/builds`, `PATCH\|DELETE /api/admin/builds/{id}`, `GET /api/admin/lineups`, `PUT\|DELETE /api/admin/lineups/{id}`, `POST /api/admin/lineups/{id}/merge`, `POST /api/admin/master/{entity}`, `PUT\|PATCH /api/admin/master/{entity}/{id}`, `POST /api/admin/master/{entity}/{id}/image`, `POST /api/admin/master/{entity}/import/preview\|commit`, `GET /api/admin/audit` |
+| Admin | `GET /api/admin/users`, `PATCH /api/admin/users/{id}`, `POST /api/admin/users/{id}/reset-password`, `GET /api/admin/builds`, `PATCH\|DELETE /api/admin/builds/{id}`, `GET /api/admin/lineups`, `PUT\|DELETE /api/admin/lineups/{id}`, `POST /api/admin/lineups/{id}/merge`, `POST /api/admin/master/{entity}`, `PUT\|PATCH /api/admin/master/{entity}/{id}`, `POST /api/admin/master/{entity}/{id}/image`, `POST /api/admin/master/{entity}/import/preview\|commit`, `GET /api/admin/audit` |
 
 Errors: `{"error": {"code": "NOT_FOUND", "message": "..."}}` with codes `VALIDATION` 400, `UNAUTHENTICATED` 401,
-`INVALID_CREDENTIALS` 401, `FORBIDDEN` / `SUSPENDED` / `EMAIL_NOT_VERIFIED` 403, `NOT_FOUND` 404,
-`EMAIL_TAKEN` / `DUPLICATE` / `HAS_BUILDS` / `OWNER_MUST_TRANSFER` 409.
+`INVALID_CREDENTIALS` 401, `FORBIDDEN` / `SUSPENDED` 403, `NOT_FOUND` 404,
+`USERNAME_TAKEN` / `DUPLICATE` / `HAS_BUILDS` / `OWNER_MUST_TRANSFER` 409, `RATE_LIMITED` 429.

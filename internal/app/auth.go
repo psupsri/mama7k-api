@@ -7,10 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
-	"net/mail"
+	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -37,11 +36,11 @@ func hashToken(raw string) []byte {
 	return h[:]
 }
 
-const userColumns = `id, email, display_name, role, suspended, deleted_at IS NOT NULL, email_verified_at IS NOT NULL`
+const userColumns = `id, username, display_name, role, suspended, deleted_at IS NOT NULL, must_change_password`
 
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
-	if err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Suspended, &u.Deleted, &u.EmailVerified); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Suspended, &u.Deleted, &u.MustChangePassword); err != nil {
 		return nil, err
 	}
 	return &u, nil
@@ -84,35 +83,6 @@ func clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
-func (s *Server) sendEmailToken(ctx context.Context, userID, email, kind string) error {
-	raw, hash := newToken()
-	ttl := 24 * time.Hour
-	if kind == "RESET_PASSWORD" {
-		ttl = time.Hour
-	}
-	if _, err := s.db.Exec(ctx, `INSERT INTO email_tokens (token_hash, user_id, kind, expires_at) VALUES ($1, $2, $3, $4)`,
-		hash, userID, kind, s.now().Add(ttl)); err != nil {
-		return err
-	}
-	if kind == "VERIFY_EMAIL" {
-		return s.mailer.Send(email, "ยืนยันอีเมล 7K Re Community", s.cfg.BaseURL+"/verify-email?token="+raw)
-	}
-	return s.mailer.Send(email, "ตั้งรหัสผ่านใหม่ 7K Re Community", s.cfg.BaseURL+"/reset-password?token="+raw)
-}
-
-// useEmailToken marks a token as used and returns its user id.
-func (s *Server) useEmailToken(ctx context.Context, tx pgx.Tx, raw, kind string) (string, error) {
-	var userID string
-	err := tx.QueryRow(ctx, `
-		UPDATE email_tokens SET used_at = now()
-		WHERE token_hash = $1 AND kind = $2 AND used_at IS NULL AND expires_at > now()
-		RETURNING user_id`, hashToken(raw), kind).Scan(&userID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", errValidation("ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว")
-	}
-	return userID, err
-}
-
 func validatePassword(p string) error {
 	if len(p) < 8 {
 		return errValidation("รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร")
@@ -121,6 +91,34 @@ func validatePassword(p string) error {
 		return errValidation("รหัสผ่านยาวเกิน 72 ตัวอักษร")
 	}
 	return nil
+}
+
+var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,20}$`)
+
+// normalizeUsername lower-cases the name; usernames compare case-insensitively.
+func normalizeUsername(n string) string {
+	return strings.ToLower(strings.TrimSpace(n))
+}
+
+func validateUsername(n string) error {
+	if !usernamePattern.MatchString(n) {
+		return errValidation("ชื่อผู้ใช้ต้องมี 3–20 ตัว ใช้ได้เฉพาะ a-z, 0-9 และ _")
+	}
+	return nil
+}
+
+func hashPassword(p string) (string, error) {
+	h, err := bcrypt.GenerateFromPassword([]byte(p), 12)
+	return string(h), err
+}
+
+// newTemporaryPassword returns a random password for an account created or reset by staff.
+func newTemporaryPassword() string {
+	b := make([]byte, 9)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func validateDisplayName(n string) (string, error) {
@@ -134,13 +132,13 @@ func validateDisplayName(n string) (string, error) {
 // ---------- handlers ----------
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) error {
-	var in struct{ Email, Password, DisplayName string }
+	var in struct{ Username, Password, DisplayName string }
 	if err := readJSON(r, &in); err != nil {
 		return err
 	}
-	email := strings.ToLower(strings.TrimSpace(in.Email))
-	if a, err := mail.ParseAddress(email); err != nil || a.Address != email {
-		return errValidation("อีเมลไม่ถูกต้อง")
+	username := normalizeUsername(in.Username)
+	if err := validateUsername(username); err != nil {
+		return err
 	}
 	if err := validatePassword(in.Password); err != nil {
 		return err
@@ -149,21 +147,18 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), 12)
+	hash, err := hashPassword(in.Password)
 	if err != nil {
 		return err
 	}
 	u, err := scanUser(s.db.QueryRow(r.Context(), `
-		INSERT INTO users (email, password_hash, display_name) VALUES ($1, $2, $3)
-		ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING
-		RETURNING `+userColumns, email, string(hash), name))
+		INSERT INTO users (username, password_hash, display_name) VALUES ($1, $2, $3)
+		ON CONFLICT (username) WHERE deleted_at IS NULL DO NOTHING
+		RETURNING `+userColumns, username, hash, name))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return errConflict("EMAIL_TAKEN", "อีเมลนี้ถูกใช้แล้ว")
+		return errConflict("USERNAME_TAKEN", "ชื่อผู้ใช้นี้ถูกใช้แล้ว")
 	}
 	if err != nil {
-		return err
-	}
-	if err := s.sendEmailToken(r.Context(), u.ID, u.Email, "VERIFY_EMAIL"); err != nil {
 		return err
 	}
 	if err := s.startSession(r.Context(), w, u.ID); err != nil {
@@ -173,15 +168,15 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) error {
-	var in struct{ Email, Password string }
+	var in struct{ Username, Password string }
 	if err := readJSON(r, &in); err != nil {
 		return err
 	}
 	var hash string
 	var u User
-	err := s.db.QueryRow(r.Context(), `SELECT password_hash, `+userColumns+` FROM users WHERE email = $1 AND deleted_at IS NULL`,
-		strings.TrimSpace(in.Email)).Scan(&hash, &u.ID, &u.Email, &u.DisplayName, &u.Role, &u.Suspended, &u.Deleted, &u.EmailVerified)
-	invalid := &Error{http.StatusUnauthorized, "INVALID_CREDENTIALS", "อีเมลหรือรหัสผ่านไม่ถูกต้อง"}
+	err := s.db.QueryRow(r.Context(), `SELECT password_hash, `+userColumns+` FROM users WHERE username = $1 AND deleted_at IS NULL`,
+		normalizeUsername(in.Username)).Scan(&hash, &u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Suspended, &u.Deleted, &u.MustChangePassword)
+	invalid := &Error{http.StatusUnauthorized, "INVALID_CREDENTIALS", "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Spend similar time as a real check so response timing does not reveal accounts.
 		_ = bcrypt.CompareHashAndPassword(dummyHash(), []byte(in.Password))
@@ -216,81 +211,53 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, viewer(r)) // null for guests
 }
 
-func (s *Server) verifyEmail(w http.ResponseWriter, r *http.Request) error {
-	var in struct{ Token string }
-	if err := readJSON(r, &in); err != nil {
-		return err
-	}
-	return pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
-		userID, err := s.useEmailToken(r.Context(), tx, in.Token, "VERIFY_EMAIL")
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(r.Context(), `UPDATE users SET email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1`, userID); err != nil {
-			return err
-		}
-		return noContent(w)
-	})
-}
-
-func (s *Server) resendVerification(w http.ResponseWriter, r *http.Request) error {
+// POST /api/me/password {"currentPassword", "newPassword"} — also clears a staff reset. Other
+// sessions are signed out; this one stays.
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) error {
 	u, err := requireUser(r)
 	if err != nil {
 		return err
 	}
-	if !u.EmailVerified {
-		if err := s.sendEmailToken(r.Context(), u.ID, u.Email, "VERIFY_EMAIL"); err != nil {
-			return err
-		}
-	}
-	return noContent(w)
-}
-
-// requestPasswordReset always succeeds so the response does not reveal whether an email exists.
-func (s *Server) requestPasswordReset(w http.ResponseWriter, r *http.Request) error {
-	var in struct{ Email string }
+	var in struct{ CurrentPassword, NewPassword string }
 	if err := readJSON(r, &in); err != nil {
 		return err
 	}
-	var id, email string
-	err := s.db.QueryRow(r.Context(), `SELECT id, email FROM users WHERE email = $1 AND deleted_at IS NULL AND NOT suspended`,
-		strings.TrimSpace(in.Email)).Scan(&id, &email)
-	if err == nil {
-		if err := s.sendEmailToken(r.Context(), id, email, "RESET_PASSWORD"); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	ctx := r.Context()
+	var hash string
+	if err := s.db.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1`, u.ID).Scan(&hash); err != nil {
 		return err
 	}
-	return noContent(w)
-}
-
-func (s *Server) confirmPasswordReset(w http.ResponseWriter, r *http.Request) error {
-	var in struct{ Token, Password string }
-	if err := readJSON(r, &in); err != nil {
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.CurrentPassword)) != nil {
+		return errValidation("รหัสผ่านปัจจุบันไม่ถูกต้อง")
+	}
+	if err := validatePassword(in.NewPassword); err != nil {
 		return err
 	}
-	if err := validatePassword(in.Password); err != nil {
-		return err
+	if in.NewPassword == in.CurrentPassword {
+		return errValidation("รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), 12)
+	newHash, err := hashPassword(in.NewPassword)
 	if err != nil {
 		return err
 	}
-	return pgx.BeginFunc(r.Context(), s.db, func(tx pgx.Tx) error {
-		userID, err := s.useEmailToken(r.Context(), tx, in.Token, "RESET_PASSWORD")
+	var current []byte
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		current = hashToken(c.Value)
+	}
+	var updated *User
+	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		updated, err = scanUser(tx.QueryRow(ctx, `UPDATE users SET password_hash = $2, must_change_password = false
+			WHERE id = $1 RETURNING `+userColumns, u.ID, newHash))
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(r.Context(), `UPDATE users SET password_hash = $2 WHERE id = $1`, userID, string(hash)); err != nil {
-			return err
-		}
-		// Sign out everywhere after a password change.
-		if _, err := tx.Exec(r.Context(), `DELETE FROM sessions WHERE user_id = $1`, userID); err != nil {
-			return err
-		}
-		return noContent(w)
+		_, err = tx.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND token_hash IS DISTINCT FROM $2`, u.ID, current)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	return ok(w, updated)
 }
 
 func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) error {

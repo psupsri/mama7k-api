@@ -2,11 +2,11 @@
 // way to bootstrap the first Super Admin and Moderators, since the web can only grant roles
 // once a Super Admin exists.
 //
-//	go run ./cmd/useradmin -email mod@example.com -name "Mod" -role MODERATOR
+//	go run ./cmd/useradmin -username mod_01 -name "Mod" -role MODERATOR
 //
 // A new account gets a random temporary password (printed once) unless -password is given;
-// its email counts as verified because an operator created it. For an existing account only
-// the role changes.
+// with a temporary password the web asks for a new one after the first sign-in. For an
+// existing account only the role changes.
 package main
 
 import (
@@ -17,7 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/mail"
+	"regexp"
 	"net/url"
 	"strings"
 
@@ -30,15 +30,15 @@ import (
 )
 
 func main() {
-	email := flag.String("email", "", "account email (required)")
-	name := flag.String("name", "", "display name for a new account (default: part of the email before @)")
+	username := flag.String("username", "", "account username: 3–20 of a-z, 0-9, _ (required)")
+	name := flag.String("name", "", "display name for a new account (default: the username)")
 	role := flag.String("role", "MODERATOR", "USER, MODERATOR or SUPER_ADMIN")
 	password := flag.String("password", "", "password for a new account (default: random, printed once)")
 	flag.Parse()
 
-	addr := strings.ToLower(strings.TrimSpace(*email))
-	if a, err := mail.ParseAddress(addr); err != nil || a.Address != addr {
-		log.Fatal("-email is missing or invalid")
+	addr := strings.ToLower(strings.TrimSpace(*username))
+	if !regexp.MustCompile(`^[a-z0-9_]{3,20}$`).MatchString(addr) {
+		log.Fatal("-username is missing or invalid (3–20 of a-z, 0-9, _)")
 	}
 	if *role != "USER" && *role != "MODERATOR" && *role != "SUPER_ADMIN" {
 		log.Fatal("-role must be USER, MODERATOR or SUPER_ADMIN")
@@ -59,7 +59,7 @@ func main() {
 	}
 
 	var id, current string
-	err = pool.QueryRow(ctx, `SELECT id, role FROM users WHERE email = $1 AND deleted_at IS NULL`, addr).Scan(&id, &current)
+	err = pool.QueryRow(ctx, `SELECT id, role FROM users WHERE username = $1 AND deleted_at IS NULL`, addr).Scan(&id, &current)
 	switch {
 	case err == nil:
 		if _, err := pool.Exec(ctx, `UPDATE users SET role = $2 WHERE id = $1`, id, *role); err != nil {
@@ -81,20 +81,20 @@ func main() {
 		}
 		display := strings.TrimSpace(*name)
 		if display == "" {
-			display = strings.SplitN(addr, "@", 2)[0]
+			display = addr
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(pw), 12)
 		if err != nil {
 			log.Fatal(err)
 		}
-		if err := pool.QueryRow(ctx, `INSERT INTO users (email, password_hash, display_name, role, email_verified_at)
-			VALUES ($1, $2, $3, $4, now()) RETURNING id`, addr, string(hash), display, *role).Scan(&id); err != nil {
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, password_hash, display_name, role, must_change_password)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id`, addr, string(hash), display, *role, *password == "").Scan(&id); err != nil {
 			log.Fatal(err)
 		}
 		audit(ctx, pool, fmt.Sprintf("%s: created as %s", addr, *role))
 		fmt.Printf("created %s (%s) as %s\n", addr, display, *role)
 		if *password == "" {
-			fmt.Printf("temporary password: %s\n(shown once; change it via \"forgot password\" after signing in)\n", pw)
+			fmt.Printf("temporary password: %s\n(shown once; the web asks for a new password after the first sign-in)\n", pw)
 		}
 	default:
 		log.Fatal(err)
