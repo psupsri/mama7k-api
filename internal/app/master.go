@@ -3,15 +3,26 @@ package app
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
+// mediaBaseURL is where relative image paths live (MEDIA_PUBLIC_URL, e.g. an R2 bucket).
+// Set once by NewServer.
+var mediaBaseURL = "/media"
+
+// imageURL turns a stored image path into a URL. Relative paths (from CSV import, e.g.
+// "master/characters/001_ludi.webp") are joined to the media base; paths that are
+// already absolute ("/media/…" from the admin upload form, or "https://…") pass through.
 func imageURL(path *string) *string {
 	if path == nil || *path == "" {
 		return nil
 	}
-	u := "/media/" + *path
+	u := *path
+	if !strings.HasPrefix(u, "/") && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		u = mediaBaseURL + "/" + u
+	}
 	return &u
 }
 
@@ -21,11 +32,11 @@ func loadMaster(ctx context.Context, q querier) (*MasterData, error) {
 	base := func(row pgx.CollectableRow, extra ...any) (MasterItem, error) {
 		var it MasterItem
 		var img *string
-		dst := append([]any{&it.ID, &it.Name, &it.Aliases, &img, &it.Active}, extra...)
+		dst := append([]any{&it.ID, &it.NameTh, &it.NameEn, &img, &it.Active}, extra...)
 		if err := row.Scan(dst...); err != nil {
 			return it, err
 		}
-		it.Code, it.Image = it.ID, imageURL(img)
+		it.Image = imageURL(img)
 		return it, nil
 	}
 	collect := func(sql string, fn func(pgx.CollectableRow) error) error {
@@ -36,52 +47,37 @@ func loadMaster(ctx context.Context, q querier) (*MasterData, error) {
 		_, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (struct{}, error) { return struct{}{}, fn(r) })
 		return err
 	}
-	const cols = `id, name, aliases, image_path, active`
-	err := collect(`SELECT `+cols+` FROM characters ORDER BY id`, func(r pgx.CollectableRow) error {
+	const cols = `id, name_th, name_en, image_path, active`
+	err := collect(`SELECT `+cols+` FROM characters ORDER BY id::int`, func(r pgx.CollectableRow) error {
 		it, err := base(r)
 		m.Characters = append(m.Characters, it)
 		return err
 	})
 	if err == nil {
-		err = collect(`SELECT `+cols+`, character_id, slot FROM skills ORDER BY character_id, slot`, func(r pgx.CollectableRow) error {
-			var sk Skill
-			var err error
-			sk.MasterItem, err = base(r, &sk.CharacterID, &sk.Slot)
-			m.Skills = append(m.Skills, sk)
-			return err
-		})
-	}
-	if err == nil {
-		err = collect(`SELECT `+cols+` FROM pets ORDER BY id`, func(r pgx.CollectableRow) error {
+		err = collect(`SELECT `+cols+` FROM pets ORDER BY id::int`, func(r pgx.CollectableRow) error {
 			it, err := base(r)
 			m.Pets = append(m.Pets, it)
 			return err
 		})
 	}
 	if err == nil {
-		err = collect(`SELECT `+cols+`, effect_2, effect_4 FROM equipment_sets ORDER BY id`, func(r pgx.CollectableRow) error {
-			var st EquipmentSet
-			var err error
-			st.MasterItem, err = base(r, &st.Effect2, &st.Effect4)
-			m.Sets = append(m.Sets, st)
+		err = collect(`SELECT `+cols+` FROM equipment_sets ORDER BY id::int`, func(r pgx.CollectableRow) error {
+			it, err := base(r)
+			m.Sets = append(m.Sets, it)
 			return err
 		})
 	}
 	if err == nil {
-		err = collect(`SELECT `+cols+`, rarity, effect FROM rings ORDER BY id`, func(r pgx.CollectableRow) error {
-			var rg Ring
-			var err error
-			rg.MasterItem, err = base(r, &rg.Rarity, &rg.Effect)
-			m.Rings = append(m.Rings, rg)
+		err = collect(`SELECT `+cols+` FROM rings ORDER BY id::int`, func(r pgx.CollectableRow) error {
+			it, err := base(r)
+			m.Rings = append(m.Rings, it)
 			return err
 		})
 	}
 	if err == nil {
-		err = collect(`SELECT `+cols+`, unit FROM stat_types ORDER BY id`, func(r pgx.CollectableRow) error {
-			var st StatType
-			var err error
-			st.MasterItem, err = base(r, &st.Unit)
-			m.Stats = append(m.Stats, st)
+		err = collect(`SELECT `+cols+` FROM stat_types ORDER BY id::int`, func(r pgx.CollectableRow) error {
+			it, err := base(r)
+			m.Stats = append(m.Stats, it)
 			return err
 		})
 	}
@@ -91,9 +87,6 @@ func loadMaster(ctx context.Context, q querier) (*MasterData, error) {
 	// Return [] rather than null for empty tables.
 	if m.Characters == nil {
 		m.Characters = []MasterItem{}
-	}
-	if m.Skills == nil {
-		m.Skills = []Skill{}
 	}
 	if m.Pets == nil {
 		m.Pets = []MasterItem{}
@@ -113,7 +106,6 @@ func loadMaster(ctx context.Context, q querier) (*MasterData, error) {
 // masterIndex gives O(1) lookups for validation.
 type masterIndex struct {
 	characters map[string]MasterItem
-	skills     map[string]Skill
 	pets       map[string]MasterItem
 	sets       map[string]EquipmentSet
 	rings      map[string]Ring
@@ -121,12 +113,9 @@ type masterIndex struct {
 }
 
 func indexMaster(m *MasterData) *masterIndex {
-	ix := &masterIndex{map[string]MasterItem{}, map[string]Skill{}, map[string]MasterItem{}, map[string]EquipmentSet{}, map[string]Ring{}, map[string]StatType{}}
+	ix := &masterIndex{map[string]MasterItem{}, map[string]MasterItem{}, map[string]EquipmentSet{}, map[string]Ring{}, map[string]StatType{}}
 	for _, x := range m.Characters {
 		ix.characters[x.ID] = x
-	}
-	for _, x := range m.Skills {
-		ix.skills[x.ID] = x
 	}
 	for _, x := range m.Pets {
 		ix.pets[x.ID] = x

@@ -32,6 +32,9 @@ type Server struct {
 }
 
 func NewServer(cfg config.Config, db *pgxpool.Pool, mailer Mailer) *Server {
+	if cfg.MediaBaseURL != "" {
+		mediaBaseURL = cfg.MediaBaseURL
+	}
 	return &Server{cfg: cfg, db: db, mailer: mailer, now: time.Now}
 }
 
@@ -96,9 +99,10 @@ func (s *Server) Handler() http.Handler {
 	h("PUT /api/admin/lineups/{id}", s.adminUpdateLineup)
 	h("POST /api/admin/lineups/{id}/merge", s.adminMergeLineup)
 	h("DELETE /api/admin/lineups/{id}", s.adminDeleteLineup)
-	h("PUT /api/admin/master/{entity}/{code}", s.adminSaveMaster)
-	h("PATCH /api/admin/master/{entity}/{code}", s.adminSetMasterActive)
-	h("POST /api/admin/master/{entity}/{code}/image", s.adminUploadImage)
+	h("POST /api/admin/master/{entity}", s.adminCreateMaster)
+	h("PUT /api/admin/master/{entity}/{id}", s.adminSaveMaster)
+	h("PATCH /api/admin/master/{entity}/{id}", s.adminSetMasterActive)
+	h("POST /api/admin/master/{entity}/{id}/image", s.adminUploadImage)
 	h("POST /api/admin/master/{entity}/import/preview", s.adminPreviewImport)
 	h("POST /api/admin/master/{entity}/import/commit", s.adminCommitImport)
 	h("GET /api/admin/audit", s.adminAuditLog)

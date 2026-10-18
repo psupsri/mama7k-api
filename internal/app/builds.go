@@ -20,7 +20,7 @@ type buildInput struct {
 	Formation       string           `json:"formation"`
 	Placements      []Placement      `json:"placements"`
 	OwnPets         []string         `json:"ownPets"`
-	SkillOrder      []string         `json:"skillOrder"`
+	SkillOrder      []SkillRef       `json:"skillOrder"`
 	Speed           *SpeedRule       `json:"speed"`
 	Recommendations []Recommendation `json:"recommendations"`
 }
@@ -55,10 +55,12 @@ func validateBuild(ctx context.Context, q querier, ix *masterIndex, userID strin
 	if hasDuplicates(in.SkillOrder) {
 		return errValidation("จองสกิลเดียวกันซ้ำไม่ได้")
 	}
-	for _, id := range in.SkillOrder {
-		sk, found := ix.skills[id]
-		if !found || !placed[sk.CharacterID] {
+	for _, sk := range in.SkillOrder {
+		if !placed[sk.CharacterID] {
 			return errValidation("สกิลต้องเป็นของตัวละครในทีม")
+		}
+		if sk.Slot != 1 && sk.Slot != 2 {
+			return errValidation("สกิลต้องเป็นสกิลบน (1) หรือสกิลล่าง (2)")
 		}
 	}
 	for _, list := range [][]string{in.OwnPets, in.CounterPets} {

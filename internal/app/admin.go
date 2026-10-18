@@ -122,7 +122,7 @@ func (s *Server) adminListPublicBuilds(w http.ResponseWriter, r *http.Request) e
 		WHERE b.visibility = 'PUBLIC' AND (
 		  b.description ILIKE $1
 		  OR coalesce((SELECT display_name FROM users WHERE id = b.creator_id), '') ILIKE $1
-		  OR EXISTS (SELECT 1 FROM characters c WHERE c.name ILIKE $1
+		  OR EXISTS (SELECT 1 FROM characters c WHERE (c.name_th ILIKE $1 OR c.name_en ILIKE $1)
 		             AND c.id IN (SELECT jsonb_array_elements(b.team->'placements')->>'characterId')))
 		ORDER BY b.updated_at DESC LIMIT 200`, q)
 	if err != nil {
@@ -359,35 +359,35 @@ func (s *Server) adminDeleteLineup(w http.ResponseWriter, r *http.Request) error
 
 type entitySpec struct {
 	table   string
-	prefix  string
 	columns []string // CSV columns, in template order
 }
 
 var entities = map[string]entitySpec{
-	"characters": {"characters", "char_", []string{"code", "name", "aliases", "active"}},
-	"skills":     {"skills", "skill_", []string{"code", "character_code", "slot", "name", "aliases", "active"}},
-	"pets":       {"pets", "pet_", []string{"code", "name", "aliases", "active"}},
-	"sets":       {"equipment_sets", "set_", []string{"code", "name", "aliases", "effect_2", "effect_4", "active"}},
-	"rings":      {"rings", "ring_", []string{"code", "name", "aliases", "rarity", "effect", "active"}},
-	"stats":      {"stat_types", "stat_", []string{"code", "name", "aliases", "unit", "active"}},
+	"characters": {"characters", []string{"id", "name_th", "name_en", "image", "active"}},
+	"pets":       {"pets", []string{"id", "name_th", "name_en", "image", "active"}},
+	"sets":       {"equipment_sets", []string{"id", "name_th", "name_en", "image", "active"}},
+	"rings":      {"rings", []string{"id", "name_th", "name_en", "image", "active"}},
+	"stats":      {"stat_types", []string{"id", "name_th", "name_en", "image", "active"}},
 }
 
-var codePattern = regexp.MustCompile(`^[a-z0-9_]+$`)
+// optionalColumns may be left out of an import file.
+var optionalColumns = map[string]bool{"name_en": true, "image": true, "active": true}
+
+// idPattern matches master ids: a running number per type, assigned once and never changed.
+var idPattern = regexp.MustCompile(`^[1-9][0-9]{0,8}$`)
 
 // masterRecord is one master item in a format-neutral shape (from JSON or a CSV row).
 type masterRecord struct {
-	Code        string   `json:"code"`
-	Name        string   `json:"name"`
-	Aliases     []string `json:"aliases"`
-	Active      *bool    `json:"active"`
-	CharacterID string   `json:"characterId,omitempty"`
-	Slot        int      `json:"slot,omitempty"`
-	Effect2     string   `json:"effect2,omitempty"`
-	Effect4     string   `json:"effect4,omitempty"`
-	Rarity      string   `json:"rarity,omitempty"`
-	Effect      string   `json:"effect,omitempty"`
-	Unit        string   `json:"unit,omitempty"`
+	ID     string `json:"id"`
+	NameTh string `json:"nameTh"`
+	NameEn string `json:"nameEn"`
+	Active *bool  `json:"active"`
+	// Image is a path relative to MEDIA_PUBLIC_URL. Nil leaves the current image unchanged.
+	Image *string `json:"image,omitempty"`
 }
+
+// imagePathPattern accepts paths like "master/characters/001_ludi.webp".
+var imagePathPattern = regexp.MustCompile(`^[A-Za-z0-9_\-]+(/[A-Za-z0-9_\-]+)*\.(webp|png|jpe?g)$`)
 
 func entityFor(r *http.Request) (string, entitySpec, error) {
 	name := r.PathValue("entity")
@@ -398,58 +398,34 @@ func entityFor(r *http.Request) (string, entitySpec, error) {
 	return name, spec, nil
 }
 
-func validateRecord(ctx context.Context, q querier, entity string, spec entitySpec, rec *masterRecord) error {
-	rec.Name = strings.TrimSpace(rec.Name)
-	if !codePattern.MatchString(rec.Code) || !strings.HasPrefix(rec.Code, spec.prefix) {
-		return errValidation(fmt.Sprintf("code %q ต้องขึ้นต้นด้วย %s และใช้ได้เฉพาะ a-z 0-9 _", rec.Code, spec.prefix))
+func validateRecord(rec *masterRecord) error {
+	rec.NameTh, rec.NameEn = strings.TrimSpace(rec.NameTh), strings.TrimSpace(rec.NameEn)
+	if !idPattern.MatchString(rec.ID) {
+		return errValidation(fmt.Sprintf("id %q ต้องเป็นตัวเลข 1 ขึ้นไป", rec.ID))
 	}
-	if rec.Name == "" {
-		return errValidation(rec.Code + ": ต้องมีชื่อ")
+	if rec.NameTh == "" {
+		return errValidation("id " + rec.ID + ": ต้องมีชื่อไทย (name_th)")
 	}
-	if rec.Aliases == nil {
-		rec.Aliases = []string{}
-	}
-	switch entity {
-	case "skills":
-		if rec.Slot != 1 && rec.Slot != 2 {
-			return errValidation(rec.Code + ": slot ต้องเป็น 1 (บน) หรือ 2 (ล่าง)")
-		}
-		var exists bool
-		if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM characters WHERE id = $1)`, rec.CharacterID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return errValidation(rec.Code + ": ไม่พบตัวละครเจ้าของสกิล")
-		}
-	case "rings":
-		if !contains([]string{"LEGENDARY", "RARE", "UNCOMMON", "COMMON"}, rec.Rarity) {
-			return errValidation(rec.Code + ": rarity ไม่ถูกต้อง")
-		}
-	case "stats":
-		if rec.Unit != "PERCENT" && rec.Unit != "NUMBER" {
-			return errValidation(rec.Code + ": unit ไม่ถูกต้อง")
-		}
+	if rec.Image != nil && *rec.Image != "" && !imagePathPattern.MatchString(*rec.Image) {
+		return errValidation("id " + rec.ID + ": path รูปไม่ถูกต้อง (เช่น master/characters/001_ludi.webp)")
 	}
 	return nil
 }
 
-// upsertRecord creates or updates by code. The code is the id and never changes (FR 9.2).
-func upsertRecord(ctx context.Context, q querier, entity string, spec entitySpec, rec masterRecord) (created bool, err error) {
+// upsertRecord creates or updates by id. The id never changes (FR 9.2).
+func upsertRecord(ctx context.Context, q querier, spec entitySpec, rec masterRecord) (created bool, err error) {
 	active := true
 	if rec.Active != nil {
 		active = *rec.Active
 	}
-	cols := []string{"id", "name", "aliases", "active"}
-	args := []any{rec.Code, rec.Name, rec.Aliases, active}
-	switch entity {
-	case "skills":
-		cols, args = append(cols, "character_id", "slot"), append(args, rec.CharacterID, rec.Slot)
-	case "sets":
-		cols, args = append(cols, "effect_2", "effect_4"), append(args, rec.Effect2, rec.Effect4)
-	case "rings":
-		cols, args = append(cols, "rarity", "effect"), append(args, rec.Rarity, rec.Effect)
-	case "stats":
-		cols, args = append(cols, "unit"), append(args, rec.Unit)
+	cols := []string{"id", "name_th", "name_en", "active"}
+	args := []any{rec.ID, rec.NameTh, rec.NameEn, active}
+	if rec.Image != nil {
+		var path any // empty clears the image
+		if *rec.Image != "" {
+			path = *rec.Image
+		}
+		cols, args = append(cols, "image_path"), append(args, path)
 	}
 	ph, sets := make([]string, len(cols)), make([]string, 0, len(cols))
 	for i, c := range cols {
@@ -465,7 +441,7 @@ func upsertRecord(ctx context.Context, q querier, entity string, spec entitySpec
 	return created, err
 }
 
-// PUT /api/admin/master/{entity}/{code}
+// PUT /api/admin/master/{entity}/{id}
 func (s *Server) adminSaveMaster(w http.ResponseWriter, r *http.Request) error {
 	me, err := requireAdmin(r, false)
 	if err != nil {
@@ -479,21 +455,21 @@ func (s *Server) adminSaveMaster(w http.ResponseWriter, r *http.Request) error {
 	if err := readJSON(r, &rec); err != nil {
 		return err
 	}
-	rec.Code = r.PathValue("code")
+	rec.ID = r.PathValue("id")
 	ctx := r.Context()
-	if err := validateRecord(ctx, s.db, entity, spec, &rec); err != nil {
+	if err := validateRecord(&rec); err != nil {
 		return err
 	}
 	var created bool
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if created, err = upsertRecord(ctx, tx, entity, spec, rec); err != nil {
+		if created, err = upsertRecord(ctx, tx, spec, rec); err != nil {
 			return err
 		}
 		action := "MASTER_UPDATED"
 		if created {
 			action = "MASTER_CREATED"
 		}
-		return audit(ctx, tx, me.ID, action, entity+"/"+rec.Code)
+		return audit(ctx, tx, me.ID, action, entity+"/"+rec.ID)
 	})
 	if err != nil {
 		return err
@@ -501,7 +477,44 @@ func (s *Server) adminSaveMaster(w http.ResponseWriter, r *http.Request) error {
 	return ok(w, map[string]bool{"created": created})
 }
 
-// PATCH /api/admin/master/{entity}/{code} {"active": bool}. Items are never deleted.
+// POST /api/admin/master/{entity} — creates an item with the next free id (max + 1).
+func (s *Server) adminCreateMaster(w http.ResponseWriter, r *http.Request) error {
+	me, err := requireAdmin(r, false)
+	if err != nil {
+		return err
+	}
+	entity, spec, err := entityFor(r)
+	if err != nil {
+		return err
+	}
+	var rec masterRecord
+	if err := readJSON(r, &rec); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		// Blocks a concurrent create (or import) from taking the same number.
+		if _, err := tx.Exec(ctx, `LOCK TABLE `+spec.table+` IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT (coalesce(max(id::int), 0) + 1)::text FROM `+spec.table).Scan(&rec.ID); err != nil {
+			return err
+		}
+		if err := validateRecord(&rec); err != nil {
+			return err
+		}
+		if _, err := upsertRecord(ctx, tx, spec, rec); err != nil {
+			return err
+		}
+		return audit(ctx, tx, me.ID, "MASTER_CREATED", entity+"/"+rec.ID)
+	})
+	if err != nil {
+		return err
+	}
+	return ok(w, map[string]string{"id": rec.ID})
+}
+
+// PATCH /api/admin/master/{entity}/{id} {"active": bool}. Items are never deleted.
 func (s *Server) adminSetMasterActive(w http.ResponseWriter, r *http.Request) error {
 	me, err := requireAdmin(r, false)
 	if err != nil {
@@ -518,9 +531,9 @@ func (s *Server) adminSetMasterActive(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	ctx := r.Context()
-	code := r.PathValue("code")
+	itemID := r.PathValue("id")
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET active = $2, updated_at = now() WHERE id = $1`, code, in.Active)
+		tag, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET active = $2, updated_at = now() WHERE id = $1`, itemID, in.Active)
 		if err != nil {
 			return err
 		}
@@ -531,7 +544,7 @@ func (s *Server) adminSetMasterActive(w http.ResponseWriter, r *http.Request) er
 		if in.Active {
 			action = "MASTER_ACTIVATE"
 		}
-		return audit(ctx, tx, me.ID, action, entity+"/"+code)
+		return audit(ctx, tx, me.ID, action, entity+"/"+itemID)
 	})
 	if err != nil {
 		return err
@@ -541,7 +554,7 @@ func (s *Server) adminSetMasterActive(w http.ResponseWriter, r *http.Request) er
 
 var imageTypes = map[string]string{"image/png": ".png", "image/webp": ".webp", "image/jpeg": ".jpg"}
 
-// POST /api/admin/master/{entity}/{code}/image (multipart, field "file", max 2 MB)
+// POST /api/admin/master/{entity}/{id}/image (multipart, field "file", max 2 MB)
 func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error {
 	me, err := requireAdmin(r, false)
 	if err != nil {
@@ -551,9 +564,9 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	code := r.PathValue("code")
-	if !codePattern.MatchString(code) {
-		return errValidation("code ไม่ถูกต้อง")
+	itemID := r.PathValue("id")
+	if !idPattern.MatchString(itemID) {
+		return errNotFound("ไม่พบรายการ")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20+1024)
 	file, _, err := r.FormFile("file")
@@ -569,10 +582,10 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 	if !allowed {
 		return errValidation("รองรับเฉพาะ PNG, WebP และ JPEG")
 	}
-	rel := filepath.ToSlash(filepath.Join(entity, fmt.Sprintf("%s-%d%s", code, time.Now().Unix(), ext)))
+	rel := filepath.ToSlash(filepath.Join(entity, fmt.Sprintf("%s-%d%s", itemID, time.Now().Unix(), ext)))
 	ctx := r.Context()
 	var exists bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+spec.table+` WHERE id = $1)`, code).Scan(&exists); err != nil {
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+spec.table+` WHERE id = $1)`, itemID).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {
@@ -586,10 +599,10 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	err = pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET image_path = $2, updated_at = now() WHERE id = $1`, code, rel); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE `+spec.table+` SET image_path = $2, updated_at = now() WHERE id = $1`, itemID, "/media/"+rel); err != nil {
 			return err
 		}
-		return audit(ctx, tx, me.ID, "MASTER_IMAGE", entity+"/"+code)
+		return audit(ctx, tx, me.ID, "MASTER_IMAGE", entity+"/"+itemID)
 	})
 	if err != nil {
 		return err
@@ -601,7 +614,7 @@ func (s *Server) adminUploadImage(w http.ResponseWriter, r *http.Request) error 
 
 type importRow struct {
 	Line    int          `json:"line"`
-	Code    string       `json:"code"`
+	ID      string       `json:"id"`
 	Status  string       `json:"status"` // CREATE | UPDATE | UNCHANGED | ERROR
 	Changes []string     `json:"changes"`
 	Error   string       `json:"error,omitempty"`
@@ -624,7 +637,7 @@ func parseImport(ctx context.Context, q querier, entity string, spec entitySpec,
 		header[strings.ToLower(strings.TrimSpace(h))] = i
 	}
 	for _, c := range spec.columns {
-		if _, found := header[c]; !found && c != "active" && c != "aliases" {
+		if _, found := header[c]; !found && !optionalColumns[c] {
 			return nil, errValidation("ขาดคอลัมน์: " + c)
 		}
 	}
@@ -645,17 +658,13 @@ func parseImport(ctx context.Context, q querier, entity string, spec entitySpec,
 		if strings.Join(cells, "") == "" {
 			continue
 		}
-		row := importRow{Line: i + 2, Code: get("code"), Changes: []string{}}
-		rec := masterRecord{Code: row.Code, Name: get("name"), CharacterID: get("character_code"),
-			Effect2: get("effect_2"), Effect4: get("effect_4"), Rarity: strings.ToUpper(get("rarity")),
-			Effect: get("effect"), Unit: strings.ToUpper(get("unit"))}
-		for _, a := range strings.Split(get("aliases"), "|") {
-			if a = strings.TrimSpace(a); a != "" {
-				rec.Aliases = append(rec.Aliases, a)
-			}
+		row := importRow{Line: i + 2, ID: get("id"), Changes: []string{}}
+		rec := masterRecord{ID: row.ID, NameTh: get("name_th"), NameEn: get("name_en")}
+		if _, hasImage := header["image"]; hasImage && get("image") != "" {
+			img := get("image")
+			rec.Image = &img
 		}
-		rec.Slot, _ = strconv.Atoi(get("slot"))
-		cur, isUpdate := existing[rec.Code]
+		cur, isUpdate := existing[rec.ID]
 		if a := strings.ToLower(get("active")); a != "" {
 			v := a == "true"
 			rec.Active = &v
@@ -663,11 +672,11 @@ func parseImport(ctx context.Context, q querier, entity string, spec entitySpec,
 			rec.Active = cur.Active // empty keeps the current state
 		}
 		switch {
-		case seen[rec.Code]:
-			row.Status, row.Error = "ERROR", "code ซ้ำในไฟล์"
+		case seen[rec.ID]:
+			row.Status, row.Error = "ERROR", "id ซ้ำในไฟล์"
 		default:
-			seen[rec.Code] = true
-			if err := validateRecord(ctx, q, entity, spec, &rec); err != nil {
+			seen[rec.ID] = true
+			if err := validateRecord(&rec); err != nil {
 				var apiErr *Error
 				if !errors.As(err, &apiErr) {
 					return nil, err
@@ -691,7 +700,7 @@ func existingRecords(entity string, m *MasterData) map[string]masterRecord {
 	out := map[string]masterRecord{}
 	b := func(it MasterItem) masterRecord {
 		a := it.Active
-		return masterRecord{Code: it.ID, Name: it.Name, Aliases: it.Aliases, Active: &a}
+		return masterRecord{ID: it.ID, NameTh: it.NameTh, NameEn: it.NameEn, Active: &a, Image: it.Image}
 	}
 	switch entity {
 	case "characters":
@@ -702,29 +711,17 @@ func existingRecords(entity string, m *MasterData) map[string]masterRecord {
 		for _, x := range m.Pets {
 			out[x.ID] = b(x)
 		}
-	case "skills":
-		for _, x := range m.Skills {
-			r := b(x.MasterItem)
-			r.CharacterID, r.Slot = x.CharacterID, x.Slot
-			out[x.ID] = r
-		}
 	case "sets":
 		for _, x := range m.Sets {
-			r := b(x.MasterItem)
-			r.Effect2, r.Effect4 = x.Effect2, x.Effect4
-			out[x.ID] = r
+			out[x.ID] = b(x)
 		}
 	case "rings":
 		for _, x := range m.Rings {
-			r := b(x.MasterItem)
-			r.Rarity, r.Effect = x.Rarity, x.Effect
-			out[x.ID] = r
+			out[x.ID] = b(x)
 		}
 	case "stats":
 		for _, x := range m.Stats {
-			r := b(x.MasterItem)
-			r.Unit = x.Unit
-			out[x.ID] = r
+			out[x.ID] = b(x)
 		}
 	}
 	return out
@@ -732,26 +729,17 @@ func existingRecords(entity string, m *MasterData) map[string]masterRecord {
 
 func diffRecords(a, b masterRecord) []string {
 	var ch []string
-	if a.Name != b.Name {
-		ch = append(ch, "name")
+	if a.NameTh != b.NameTh {
+		ch = append(ch, "nameTh")
 	}
-	if strings.Join(a.Aliases, "|") != strings.Join(b.Aliases, "|") {
-		ch = append(ch, "aliases")
+	if a.NameEn != b.NameEn {
+		ch = append(ch, "nameEn")
 	}
 	if *a.Active != *b.Active {
 		ch = append(ch, "active")
 	}
-	for _, f := range []struct {
-		name string
-		x, y string
-	}{{"characterId", a.CharacterID, b.CharacterID}, {"effect2", a.Effect2, b.Effect2}, {"effect4", a.Effect4, b.Effect4},
-		{"rarity", a.Rarity, b.Rarity}, {"effect", a.Effect, b.Effect}, {"unit", a.Unit, b.Unit}} {
-		if f.x != f.y {
-			ch = append(ch, f.name)
-		}
-	}
-	if a.Slot != b.Slot {
-		ch = append(ch, "slot")
+	if b.Image != nil && ptrString(imageURL(a.Image)) != ptrString(imageURL(b.Image)) {
+		ch = append(ch, "image")
 	}
 	return ch
 }
@@ -811,7 +799,7 @@ func (s *Server) adminCommitImport(w http.ResponseWriter, r *http.Request) error
 			if row.Status == "UNCHANGED" {
 				continue
 			}
-			if _, err := upsertRecord(ctx, tx, entity, spec, row.Item); err != nil {
+			if _, err := upsertRecord(ctx, tx, spec, row.Item); err != nil {
 				return err
 			}
 			if row.Status == "CREATE" {
@@ -853,4 +841,11 @@ func (s *Server) adminAuditLog(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return ok(w, list)
+}
+
+func ptrString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

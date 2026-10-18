@@ -2,8 +2,7 @@ package app
 
 import "time"
 
-// JSON shapes mirror web/src/types/domain.ts so the web client can switch from the mock
-// API without UI changes. Keep the two in sync.
+// JSON shapes mirror web/src/types/domain.ts. Keep the two in sync.
 
 type Role string
 
@@ -26,40 +25,29 @@ type User struct {
 // ---------- master data ----------
 
 type MasterItem struct {
-	ID      string   `json:"id"`
-	Code    string   `json:"code"`
-	Name    string   `json:"name"`
-	Aliases []string `json:"aliases"`
-	Image   *string  `json:"image,omitempty"`
-	Active  bool     `json:"active"`
+	ID     string  `json:"id"`     // running number per type, e.g. "12"
+	NameTh string  `json:"nameTh"` // Thai community name, shown to users
+	NameEn string  `json:"nameEn"`
+	Image  *string `json:"image,omitempty"`
+	Active bool    `json:"active"`
 }
 
-type Skill struct {
-	MasterItem
+// SkillRef is one reserved skill: the upper (1) or lower (2) skill of a character in the
+// team. Skills are not master data; every character has exactly these two.
+type SkillRef struct {
 	CharacterID string `json:"characterId"`
 	Slot        int    `json:"slot"`
 }
 
-type EquipmentSet struct {
-	MasterItem
-	Effect2 string `json:"effect2"`
-	Effect4 string `json:"effect4"`
-}
-
-type Ring struct {
-	MasterItem
-	Rarity string `json:"rarity"`
-	Effect string `json:"effect"`
-}
-
-type StatType struct {
-	MasterItem
-	Unit string `json:"unit"`
-}
+// Sets, rings and stats carry only the common fields.
+type (
+	EquipmentSet = MasterItem
+	Ring         = MasterItem
+	StatType     = MasterItem
+)
 
 type MasterData struct {
 	Characters []MasterItem   `json:"characters"`
-	Skills     []Skill        `json:"skills"`
 	Pets       []MasterItem   `json:"pets"`
 	Sets       []EquipmentSet `json:"sets"`
 	Rings      []Ring         `json:"rings"`
@@ -123,7 +111,7 @@ type SpeedRule struct {
 type Team struct {
 	Placements      []Placement      `json:"placements"`
 	OwnPets         []string         `json:"ownPets"`
-	SkillOrder      []string         `json:"skillOrder"`
+	SkillOrder      []SkillRef       `json:"skillOrder"`
 	Speed           *SpeedRule       `json:"speed"`
 	Recommendations []Recommendation `json:"recommendations"`
 }

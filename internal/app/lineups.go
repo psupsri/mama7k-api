@@ -48,7 +48,7 @@ func validatePlacements(ix *masterIndex, formation string, ps []Placement, requi
 			return errValidation("ไม่พบตัวละคร " + p.CharacterID)
 		}
 		if requireActive && !c.Active {
-			return errValidation("ตัวละคร " + c.Name + " ปิดใช้งานแล้ว")
+			return errValidation("ตัวละคร " + c.NameTh + " ปิดใช้งานแล้ว")
 		}
 		key := fmt.Sprintf("%s:%d", p.Row, p.Slot)
 		if chars[p.CharacterID] || slots[key] {
@@ -115,7 +115,7 @@ func insertPlacements(ctx context.Context, tx pgx.Tx, lineupID string, ps []Plac
 
 // GET /api/lineups?characters=a,b — lineups containing all given characters.
 func (s *Server) listLineups(w http.ResponseWriter, r *http.Request) error {
-	var chars []string
+	chars := []string{} // not nil: a NULL array would make cardinality() NULL and match nothing
 	if c := r.URL.Query().Get("characters"); c != "" {
 		chars = strings.Split(c, ",")
 	}

@@ -257,7 +257,7 @@ func TestBuildListPaging(t *testing.T) {
 	e.guest().expect(200, "GET", path+"&pageSize=500", nil).json(t, &big)
 	eq(t, []int{p1.Total, len(p1.Items), p1.PageSize, len(p3.Items)}, []int{26, 9, 9, 8})
 	eq(t, big.PageSize, 50) // capped
-	eq(t, p1.CounterPets, []string{"pet_taeo"})
+	eq(t, p1.CounterPets, []string{seed.Pet("taeo")})
 	eq(t, p1.Items[0].Build.ID, big.Items[0].Build.ID)
 }
 
@@ -270,9 +270,9 @@ func TestDuplicateLineupIgnoresOrderWithinRow(t *testing.T) {
 		Existed bool
 	}
 	e.as(2).expect(200, "POST", "/api/lineups", map[string]any{"formation": "F4B1", "placements": []map[string]any{
-		{"characterId": "char_hayeon", "row": "FRONT", "slot": 0},
-		{"characterId": "char_lubu", "row": "FRONT", "slot": 3},
-		{"characterId": "char_soran", "row": "BACK", "slot": 0},
+		{"characterId": seed.Char("hayeon"), "row": "FRONT", "slot": 0},
+		{"characterId": seed.Char("lubu"), "row": "FRONT", "slot": 3},
+		{"characterId": seed.Char("soran"), "row": "BACK", "slot": 0},
 	}}).json(t, &out)
 	if !out.Existed || out.Lineup.ID != seed.LineupID(1) {
 		t.Fatalf("want existing l1, got %+v", out)
@@ -283,9 +283,9 @@ func TestCharacterInAnotherRowIsADifferentLineup(t *testing.T) {
 	e := setup(t)
 	var out struct{ Existed bool }
 	e.as(2).expect(200, "POST", "/api/lineups", map[string]any{"formation": "F3B2", "placements": []map[string]any{
-		{"characterId": "char_lubu", "row": "FRONT", "slot": 0},
-		{"characterId": "char_soran", "row": "FRONT", "slot": 1},
-		{"characterId": "char_hayeon", "row": "BACK", "slot": 0},
+		{"characterId": seed.Char("lubu"), "row": "FRONT", "slot": 0},
+		{"characterId": seed.Char("soran"), "row": "FRONT", "slot": 1},
+		{"characterId": seed.Char("hayeon"), "row": "BACK", "slot": 0},
 	}}).json(t, &out)
 	if out.Existed {
 		t.Fatal("should be a new lineup")
@@ -296,7 +296,7 @@ func TestCharacterInAnotherRowIsADifferentLineup(t *testing.T) {
 
 func TestEnemyPetFilterIncludesBuildsThatCounterAnyPet(t *testing.T) {
 	e := setup(t)
-	eq(t, e.as(1).lineupBuilds(1, "?enemyPet=pet_yu"), []string{"b1", "b2", "b4"})
+	eq(t, e.as(1).lineupBuilds(1, "?enemyPet="+seed.Pet("yu")), []string{"b1", "b2", "b4"})
 }
 
 // ---------- FR 6 votes ----------
@@ -392,10 +392,11 @@ func TestBuildValidation(t *testing.T) {
 	e := setup(t)
 	c := e.as(1)
 	cases := map[string]map[string]any{
-		"skill of a character not in the team": {"skillOrder": []string{"skill_rudy_1"}},
+		"skill of a character not in the team": {"skillOrder": []map[string]any{{"characterId": seed.Char("rudy"), "slot": 1}}},
+		"skill slot other than upper/lower":    {"skillOrder": []map[string]any{{"characterId": seed.Char("yungon"), "slot": 3}}},
 		"group the creator is not in":          {"visibility": "GROUP", "groupIds": []string{seed.GroupID(3)}},
 		"group visibility without groups":      {"visibility": "GROUP", "groupIds": []string{}},
-		"unknown pet":                          {"ownPets": []string{"pet_nope"}},
+		"unknown pet":                          {"ownPets": []string{"999"}},
 	}
 	for name, patch := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -533,7 +534,7 @@ func TestMergeLineupsAndDeleteOnlyEmpty(t *testing.T) {
 func TestImportPreviewAndAllOrNothingCommit(t *testing.T) {
 	e := setup(t)
 	a := e.as(1)
-	csv := "code,name,aliases,active\npet_yu,ยูใหม่,Yu,true\npet_new,ใหม่,,\nbad code,x,,"
+	csv := "id,name_th,name_en,active\n" + seed.Pet("yu") + ",ยูใหม่,Yu,true\n100,ใหม่,,\npet_x,x,,"
 	var rows []struct{ Status string }
 	a.expect(200, "POST", "/api/admin/master/pets/import/preview", map[string]string{"csv": csv}).json(t, &rows)
 	statuses := []string{}
@@ -542,13 +543,13 @@ func TestImportPreviewAndAllOrNothingCommit(t *testing.T) {
 	}
 	eq(t, statuses, []string{"UPDATE", "CREATE", "ERROR"})
 	a.expect(400, "POST", "/api/admin/master/pets/import/commit", map[string]string{"csv": csv})
-	eq(t, count(t, `SELECT count(*) FROM pets WHERE id = 'pet_new'`), 0) // nothing written
+	eq(t, count(t, `SELECT count(*) FROM pets WHERE id = '100'`), 0) // nothing written
 
 	good := strings.Join(strings.Split(csv, "\n")[:3], "\n")
 	var res map[string]int
 	a.expect(200, "POST", "/api/admin/master/pets/import/commit", map[string]string{"csv": good}).json(t, &res)
 	eq(t, res, map[string]int{"created": 1, "updated": 1})
-	eq(t, count(t, `SELECT count(*) FROM pets WHERE id = 'pet_yu' AND name = 'ยูใหม่'`), 1)
+	eq(t, count(t, `SELECT count(*) FROM pets WHERE id = $1 AND name_th = 'ยูใหม่' AND name_en = 'Yu'`, seed.Pet("yu")), 1)
 }
 
 func TestAdminSeesOnlyPublicBuilds(t *testing.T) {
@@ -572,4 +573,52 @@ func TestSuspendRevokesSessions(t *testing.T) {
 	if got := strings.TrimSpace(string(victim.do("GET", "/api/me", nil).body)); got != "null" {
 		t.Fatalf("suspended user still signed in: %s", got)
 	}
+}
+
+func TestImportImagePaths(t *testing.T) {
+	e := setup(t)
+	a := e.as(1)
+	yungon := seed.Char("yungon")
+	csv := "id,name_th,name_en,image,active\n" +
+		yungon + ",ยุนกอน,,master/characters/039_yungon.webp,\n" +
+		"100,ใหม่,,../secret.webp,\n"
+	var rows []struct{ Status, Error string }
+	a.expect(200, "POST", "/api/admin/master/characters/import/preview", map[string]string{"csv": csv}).json(t, &rows)
+	eq(t, []string{rows[0].Status, rows[1].Status}, []string{"UPDATE", "ERROR"}) // path traversal rejected
+
+	good := strings.Join(strings.Split(csv, "\n")[:2], "\n")
+	a.expect(200, "POST", "/api/admin/master/characters/import/commit", map[string]string{"csv": good})
+	image := func() string {
+		var m struct{ Characters []struct{ ID, Image string } }
+		e.guest().expect(200, "GET", "/api/master", nil).json(t, &m)
+		for _, c := range m.Characters {
+			if c.ID == yungon {
+				return c.Image
+			}
+		}
+		return ""
+	}
+	eq(t, image(), "/media/master/characters/039_yungon.webp") // joined to MEDIA_PUBLIC_URL (default /media)
+
+	// An empty image cell keeps the current image.
+	a.expect(200, "POST", "/api/admin/master/characters/import/commit", map[string]string{"csv": "id,name_th,image\n" + yungon + ",ยุนกอน 2,"})
+	eq(t, image(), "/media/master/characters/039_yungon.webp")
+}
+
+func TestCreateMasterTakesNextID(t *testing.T) {
+	e := setup(t)
+	var out struct{ ID string }
+	e.as(1).expect(200, "POST", "/api/admin/master/pets", map[string]string{"nameTh": "ใหม่", "nameEn": "New"}).json(t, &out)
+	eq(t, out.ID, "7") // six sample pets
+	eq(t, count(t, `SELECT count(*) FROM pets WHERE id = '7' AND name_en = 'New'`), 1)
+	e.as(1).expect(400, "POST", "/api/admin/master/pets", map[string]string{"nameTh": " "})
+}
+
+func TestListLineupsWithoutFilterReturnsAll(t *testing.T) {
+	e := setup(t)
+	var all, some []struct{ Lineup struct{ ID string } }
+	e.guest().expect(200, "GET", "/api/lineups", nil).json(t, &all)
+	eq(t, len(all), 4)
+	e.guest().expect(200, "GET", "/api/lineups?characters="+seed.Char("lubu")+","+seed.Char("soran"), nil).json(t, &some)
+	eq(t, len(some), 1)
 }
