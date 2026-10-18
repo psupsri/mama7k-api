@@ -102,9 +102,11 @@ type Recommendation struct {
 	Note              string       `json:"note"`
 }
 
+// SpeedRule compares the team's speed with the enemy's: Kind is FASTER, SLOWER or empty
+// (not specified), and Note is free text such as "สปีด 150 ขึ้นไป". Nil when both are empty.
 type SpeedRule struct {
-	Kind  string `json:"kind"` // FASTER | MIN
-	Value int    `json:"value,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	Note string `json:"note,omitempty"`
 }
 
 // Team is stored as JSONB in builds.team.

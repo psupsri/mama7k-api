@@ -397,12 +397,29 @@ func TestBuildValidation(t *testing.T) {
 		"group the creator is not in":          {"visibility": "GROUP", "groupIds": []string{seed.GroupID(3)}},
 		"group visibility without groups":      {"visibility": "GROUP", "groupIds": []string{}},
 		"unknown pet":                          {"ownPets": []string{"999"}},
+		"old minimum-speed rule":               {"speed": map[string]any{"kind": "MIN", "value": 100}},
 	}
 	for name, patch := range cases {
 		t.Run(name, func(t *testing.T) {
 			c.expect(400, "PUT", "/api/builds/"+seed.BuildID(1), c.buildInput(1, patch))
 		})
 	}
+}
+
+func TestSpeedRuleKindAndNote(t *testing.T) {
+	e := setup(t)
+	c := e.as(1)
+	speedOf := func() any {
+		var d struct{ Build map[string]any }
+		c.expect(200, "GET", "/api/builds/"+seed.BuildID(1), nil).json(t, &d)
+		return d.Build["speed"]
+	}
+	c.expect(200, "PUT", "/api/builds/"+seed.BuildID(1), c.buildInput(1, map[string]any{"speed": map[string]any{"kind": "SLOWER", "note": "  ช้ากว่ายุนกอนศัตรู  "}}))
+	eq(t, speedOf(), map[string]any{"kind": "SLOWER", "note": "ช้ากว่ายุนกอนศัตรู"})
+	c.expect(200, "PUT", "/api/builds/"+seed.BuildID(1), c.buildInput(1, map[string]any{"speed": map[string]any{"note": "สปีด 150+"}}))
+	eq(t, speedOf(), map[string]any{"note": "สปีด 150+"})
+	c.expect(200, "PUT", "/api/builds/"+seed.BuildID(1), c.buildInput(1, map[string]any{"speed": map[string]any{"kind": "", "note": " "}}))
+	eq(t, speedOf(), nil)
 }
 
 // ---------- FR 5 groups ----------

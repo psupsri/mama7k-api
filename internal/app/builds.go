@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -74,11 +75,17 @@ func validateBuild(ctx context.Context, q querier, ix *masterIndex, userID strin
 		}
 	}
 	if in.Speed != nil {
-		switch {
-		case in.Speed.Kind == "FASTER":
-		case in.Speed.Kind == "MIN" && in.Speed.Value > 0:
+		in.Speed.Note = strings.TrimSpace(in.Speed.Note)
+		switch in.Speed.Kind {
+		case "", "FASTER", "SLOWER":
 		default:
 			return errValidation("เงื่อนไข Speed ไม่ถูกต้อง")
+		}
+		if utf8.RuneCountInString(in.Speed.Note) > 200 {
+			return errValidation("หมายเหตุ Speed ยาวเกิน 200 ตัวอักษร")
+		}
+		if in.Speed.Kind == "" && in.Speed.Note == "" {
+			in.Speed = nil
 		}
 	}
 	if len(in.Recommendations) != len(in.Placements) {
