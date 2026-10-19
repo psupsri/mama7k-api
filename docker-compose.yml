@@ -1,0 +1,23 @@
+# Fixed project name so the database keeps the existing "mama7k_db-data" volume.
+name: mama7k
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: mama7k
+      POSTGRES_PASSWORD: mama7k
+      POSTGRES_DB: mama7k
+    ports:
+      - "5433:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+      - ./scripts/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mama7k"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  db-data:

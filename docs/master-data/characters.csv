@@ -1,0 +1,117 @@
+id,name_th,name_en,image,active
+1,ลูดี้,rudy,master/characters/001_ludi.webp,true
+2,ไอลีน,,master/characters/002_eileen.webp,true
+3,ราเชล,,master/characters/003_rachel.webp,true
+4,สไปค์,,master/characters/004_spike.webp,true
+5,เจฟ,,master/characters/005_jave.webp,true
+6,คริส,,master/characters/006_kris.webp,true
+7,วาเนสซ่า,,master/characters/007_vanessa.webp,true
+8,ไพร์,fai,master/characters/008_pyre.webp,true
+9,โรซี่,rosie,master/characters/009_rosie.webp,true
+10,จูริ,juri,master/characters/010_juri.webp,true
+11,มิเลีย,melia,master/characters/011_milia.webp,true
+12,เกลลิดัส,gelidus,master/characters/012_gelidus.webp,true
+13,เมลคีร์,,master/characters/013_melkir.webp,true
+14,โคลท์,,master/characters/014_colt.webp,true
+15,เพลตัน,,master/characters/015_pelton.webp,true
+16,บรันซ์ & บรันเซล,,master/characters/016_bruns_and_brunsel.webp,true
+17,พาลานอส,,master/characters/017_palanus.webp,true
+18,เดลโลนส์,dellons,master/characters/018_dellons.webp,true
+19,เอซ,,master/characters/019_ace.webp,true
+20,ริน,,master/characters/020_rin.webp,true
+21,ซุนหงอคง,,master/characters/021_sun_wukong.webp,true
+22,ลิโป้,,master/characters/022_lubu.webp,true
+23,แทโอ,,master/characters/023_teo.webp,true
+24,ยอนฮี,,master/characters/024_yeonhee.webp,true
+25,คาร์ม่า,,master/characters/025_karma.webp,true
+26,ไคล์,,master/characters/026_kyle.webp,true
+27,ทากะ,,master/characters/027_taka.webp,true
+28,ออร์ลี่,,master/characters/028_orly.webp,true
+29,อากีล่า,,master/characters/029_aquila.webp,true
+30,โอม๊ก,,master/characters/030_omok.webp,true
+31,คาร์ล เฮรอน,,master/characters/031_karl_heron.webp,true
+32,คิริเอล,,master/characters/032_kiriel.webp,true
+33,เอลิเซีย,,master/characters/033_elysia.webp,true
+34,ไรอัน,,master/characters/034_ryan.webp,true
+35,พยัคฆ์เมฆา,,master/characters/035_phayak_mekha.webp,true
+36,คางุระ,,master/characters/036_kagura.webp,true
+37,มิโฮะ,,master/characters/037_miho.webp,true
+38,เอมิเลีย,,master/characters/038_emilia.webp,true
+39,ยุนกอน,yoongun,master/characters/039_yungon.webp,true
+40,ธรูด,,master/characters/040_thrud.webp,true
+41,เฟร์ยา,,master/characters/041_freyja.webp,true
+42,แร็ดกริด,,master/characters/042_redgrid.webp,true
+43,เรกินเลฟ,,master/characters/043_reginleif.webp,true
+44,แรนด์กริด,,master/characters/044_randgrid.webp,true
+45,มิสต์,,master/characters/045_mist.webp,true
+46,สกัลด์,,master/characters/046_skuld.webp,true
+47,ซิลเวสตา,,master/characters/047_silvesta.webp,true
+48,เคลมิส,clemyth,master/characters/048_klemis.webp,true
+49,ออร์ก้า,,master/characters/049_orca.webp,true
+50,อาริส,,master/characters/050_aris.webp,true
+51,ซอรัน,sunran,master/characters/051_soran.webp,true
+52,ฮายอน,,master/characters/052_hayeon.webp,true
+53,โซอี,,master/characters/053_soi.webp,true
+54,เฟิงเยี่ยน,,master/characters/054_fengyan.webp,true
+55,หลิงหลิง,,master/characters/055_lingling.webp,true
+56,ไป่หลง,,master/characters/056_bailong.webp,true
+57,ยูชิน,,master/characters/057_yushin.webp,true
+58,พีดัม,,master/characters/058_phidam.webp,true
+59,ไป๋เจียว,,master/characters/059_baijiao.webp,true
+60,เสี่ยวเฉียว,,master/characters/060_xiaoqiao.webp,true
+61,นาจา,,master/characters/061_nezha.webp,true
+62,รีน่า,,master/characters/062_rina.webp,true
+63,แคทตี้,,master/characters/063_cathy.webp,true
+64,จิน,,master/characters/064_jin.webp,true
+65,เรย์,,master/characters/065_rei.webp,true
+66,เดซี่,,master/characters/066_daisy.webp,true
+67,อสุรา,,master/characters/067_asura.webp,true
+68,ปาสคาล,,master/characters/068_pascal.webp,true
+69,จูล่ง,,master/characters/069_zhaoyun.webp,true
+70,เตียวเสี้ยน,,master/characters/070_diaochan.webp,true
+71,กวนอู,,master/characters/071_guanyu.webp,true
+72,โดยอง,,master/characters/072_doyoung.webp,true
+73,น็อกซ์,,master/characters/073_knox.webp,true
+74,อีวาน,,master/characters/074_evan.webp,true
+75,คาริน,,master/characters/075_karin.webp,true
+76,ยูริ,,master/characters/076_yuri.webp,true
+77,ลี,,master/characters/077_lee.webp,true
+78,ยูอิ,,master/characters/078_yui.webp,true
+79,แอเรียล,,master/characters/079_ariel.webp,true
+80,จูพี้,,master/characters/080_jupy.webp,true
+81,สนิปเปอร์,,master/characters/081_sniper.webp,true
+82,เฮเลเนีย,,master/characters/082_helenia.webp,true
+83,เฮฟเว่นเนีย,,master/characters/083_heavenia.webp,true
+84,คารอน,,master/characters/084_karon.webp,true
+85,วิคตอเรีย,,master/characters/085_victoria.webp,true
+86,ลูซี่,,master/characters/086_lucy.webp,true
+87,เบลลิก้า,,master/characters/087_bellica.webp,true
+88,ซิลเวีย,,master/characters/088_sylvia.webp,true
+89,โจ๊กเกอร์,,master/characters/089_joker.webp,true
+90,เสี่ยว,,master/characters/090_xiao.webp,true
+91,ลุค,,master/characters/091_luke.webp,true
+92,ชานซะเลอร์,,master/characters/092_chancellor.webp,true
+93,เมย์,,master/characters/093_may.webp,true
+94,อลิซ,,master/characters/094_alice.webp,true
+95,อารากอน,,master/characters/095_aragon.webp,true
+96,โนโฮ,,master/characters/096_noho.webp,true
+97,โคลอี้,,master/characters/097_chloe.webp,true
+98,บิสกิต,,master/characters/098_biscuit.webp,true
+99,แทอู๊ด,,master/characters/099_taewood.webp,true
+100,ลูลี่,,master/characters/100_luli.webp,true
+101,เนีย,,master/characters/101_nia.webp,true
+102,เอสปาด้า,,master/characters/102_espada.webp,true
+103,เซอิน,,master/characters/103_sein.webp,true
+104,ซีค,,master/characters/104_zeke.webp,true
+105,เจน,,master/characters/105_jen.webp,true
+106,แบล็คโรส,,master/characters/106_blackrose.webp,true
+107,เซร่า,,master/characters/107_sera.webp,true
+108,บาลิสต้า,,master/characters/108_balista.webp,true
+109,ซง จินอู,sung jinwoo,master/characters/109_sung_jinwoo.webp,true
+110,ชา แฮอิน,cha hae-in,master/characters/110_cha_haein.webp,true
+111,ยู จินโฮ,yoo jinho,master/characters/111_yoo_jinho.webp,true
+112,อี จูฮี,lee joohee,master/characters/112_lee_joohee.webp,true
+113,คามาโดะ ทันจิโร่,tanjiro kamado,master/characters/113_tanjiro_kamado.webp,true
+114,อางาซึมะ เซนอิทซึ,zenitsu agatsuma,master/characters/114_zenitsu_agatsuma.webp,true
+115,โคโจ ชิโนบุ,shinobu kocho,master/characters/115_shinobu_kocho.webp,true
+116,โทมิโอกะ กิยู,giyu tomioka,master/characters/116_giyu_tomioka.webp,true

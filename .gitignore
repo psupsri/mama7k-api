@@ -1,1 +1,15 @@
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# Images uploaded through the admin form when running locally
 uploads/
+
+# Game images live in R2 (see docs/master-data/README.md), not in git
+docs/master-data/**/*.webp
+docs/master-data/**/*.png
+docs/master-data/**/*.jpg
+docs/master-data/**/*.jpeg
+docs/master-data/**/*.zip

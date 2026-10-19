@@ -1,0 +1,10 @@
+id,name_th,name_en,image,active
+1,ผู้บัญชาการ,Attack,master/equipment-sets/01_attack.webp,true
+2,ผู้ไล่ล่า,Crit Rate,master/equipment-sets/02_pierce.webp,true
+3,นักฆ่า,,master/equipment-sets/03_crit_rate.webp,true
+4,ผู้ล้างแค้น,Pierce,master/equipment-sets/04_boss.webp,true
+5,หมอผี,,master/equipment-sets/05_effect_buff.webp,true
+6,ผู้พิทักษ์,Defense,master/equipment-sets/06_defense.webp,true
+7,อัศวินศักดิ์สิทธิ์,HP,master/equipment-sets/07_hp.webp,true
+8,นายประตู,,master/equipment-sets/08_block.webp,true
+9,ผู้ปรับสมดุล,Effect Resistance,master/equipment-sets/09_effect_res.webp,true

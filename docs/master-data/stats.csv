@@ -1,0 +1,12 @@
+id,name_th,name_en,image,active
+1,อัตราคริ,Crit Rate,,true
+2,จุดอ่อน,Weakness Hit Chance,,true
+3,คริดาเมจ,Crit Damage,,true
+4,เข้าเป้า,Effect Hit Rate,,true
+5,ต้าน,Effect Resistance,,true
+6,ความเร็วโจมตี,Speed,,true
+7,อัตราบล็อค,Block Rate,,true
+8,ลดดาเมจ,Damage Taken Reduction,,true
+9,โจม %,All Attack %,,true
+10,เลือด %,HP %,,true
+11,ป้องกัน %,Defense %,,true
