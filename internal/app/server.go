@@ -50,6 +50,9 @@ func (s *Server) Handler() http.Handler {
 	// Master data (FR 9)
 	h("GET /api/master", s.getMaster)
 
+	// Feedback: anyone sends, staff reads
+	h("POST /api/feedback", s.sendFeedback)
+
 	// Defense lineups (FR 3)
 	h("GET /api/lineups", s.listLineups)
 	h("POST /api/lineups", s.createLineup)
@@ -96,6 +99,9 @@ func (s *Server) Handler() http.Handler {
 	h("POST /api/admin/master/{entity}/import/preview", s.adminPreviewImport)
 	h("POST /api/admin/master/{entity}/import/commit", s.adminCommitImport)
 	h("GET /api/admin/audit", s.adminAuditLog)
+	h("GET /api/admin/feedback", s.adminListFeedback)
+	h("PATCH /api/admin/feedback/{id}", s.adminResolveFeedback)
+	h("DELETE /api/admin/feedback/{id}", s.adminDeleteFeedback)
 
 	mux.Handle("GET /media/", http.StripPrefix("/media/", http.FileServer(http.Dir(s.cfg.UploadDir))))
 	mux.Handle("GET /api/", s.wrap(func(http.ResponseWriter, *http.Request) error { return errNotFound("ไม่พบ API นี้") }))

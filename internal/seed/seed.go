@@ -33,7 +33,7 @@ func ResetAccounts(ctx context.Context, pool *pgxpool.Pool) error { return reset
 
 func reset(ctx context.Context, pool *pgxpool.Pool, sample bool) error {
 	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `TRUNCATE audit_log, votes, build_shares, builds, lineup_placements, lineups,
+		if _, err := tx.Exec(ctx, `TRUNCATE audit_log, feedback, votes, build_shares, builds, lineup_placements, lineups,
 			group_members, groups, sessions, users, stat_types, rings, equipment_sets, pets, characters
 			RESTART IDENTITY CASCADE`); err != nil {
 			return err

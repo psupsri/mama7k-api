@@ -745,3 +745,46 @@ func TestServesWebAppWithClientRoutes(t *testing.T) {
 		t.Fatalf("health: %d", code)
 	}
 }
+
+// ---------- feedback ----------
+
+func TestAnyoneSendsFeedbackOnlyStaffReadsIt(t *testing.T) {
+	e := setup(t)
+	e.guest().expect(204, "POST", "/api/feedback", map[string]string{"kind": "BUG", "message": "  ปุ่มโหวตกดไม่ได้  ", "contact": "discord: mee", "page": "/lineups/x"})
+	e.as(2).expect(204, "POST", "/api/feedback", map[string]string{"kind": "IDEA", "message": "อยากให้กรองตามเซ็ต", "page": "https://evil.example/"})
+	for _, bad := range []map[string]string{{"kind": "SPAM", "message": "x"}, {"kind": "BUG", "message": "   "}} {
+		eq(t, e.guest().expect(400, "POST", "/api/feedback", bad).errCode(t), "VALIDATION")
+	}
+
+	e.guest().expect(401, "GET", "/api/admin/feedback", nil)
+	e.as(2).expect(403, "GET", "/api/admin/feedback", nil) // a plain user
+
+	var list []struct {
+		ID, Kind, Message, Contact, Page string
+		User                             *struct{ Username string }
+	}
+	e.as(3).expect(200, "GET", "/api/admin/feedback", nil).json(t, &list) // moderator
+	if len(list) != 2 || list[0].Kind != "IDEA" || list[0].User == nil || list[0].User.Username != "mee" || list[0].Page != "" ||
+		list[1].User != nil || list[1].Message != "ปุ่มโหวตกดไม่ได้" || list[1].Contact != "discord: mee" || list[1].Page != "/lineups/x" {
+		t.Fatalf("feedback list: %+v", list)
+	}
+
+	e.as(3).expect(200, "PATCH", "/api/admin/feedback/"+list[1].ID, map[string]bool{"resolved": true})
+	var open, done []struct{ ID string }
+	e.as(1).expect(200, "GET", "/api/admin/feedback", nil).json(t, &open)
+	e.as(1).expect(200, "GET", "/api/admin/feedback?status=done", nil).json(t, &done)
+	eq(t, []int{len(open), len(done)}, []int{1, 1})
+
+	e.as(1).expect(204, "DELETE", "/api/admin/feedback/"+list[0].ID, nil)
+	e.as(1).expect(404, "DELETE", "/api/admin/feedback/"+list[0].ID, nil)
+	eq(t, count(t, `SELECT count(*) FROM audit_log WHERE action IN ('FEEDBACK_RESOLVE', 'FEEDBACK_DELETE')`), 2)
+}
+
+func TestFeedbackIsRateLimited(t *testing.T) {
+	e := setup(t)
+	msg := map[string]string{"kind": "OTHER", "message": "สวัสดี"}
+	for range 5 {
+		e.guest().expect(204, "POST", "/api/feedback", msg)
+	}
+	eq(t, e.guest().expect(429, "POST", "/api/feedback", msg).errCode(t), "RATE_LIMITED")
+}

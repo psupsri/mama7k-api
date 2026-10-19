@@ -55,15 +55,16 @@ func (l *limiter) allow(key string, now time.Time) (ok bool, retry time.Duration
 }
 
 // rateLimits guard sign-in and sign-up against password guessing and mass account creation,
-// and cap all other writes per client IP.
+// keep the open feedback form from being flooded, and cap all other writes per client IP.
 type rateLimits struct {
-	login, register, writes *limiter
+	login, register, feedback, writes *limiter
 }
 
 func defaultRateLimits() rateLimits {
 	return rateLimits{
 		login:    newLimiter(10, 5*time.Minute),
 		register: newLimiter(5, time.Hour),
+		feedback: newLimiter(5, 10*time.Minute),
 		writes:   newLimiter(120, time.Minute),
 	}
 }
@@ -76,6 +77,8 @@ func (s *Server) rateLimit(next http.Handler) http.Handler {
 			l = s.limits.login
 		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/register":
 			l = s.limits.register
+		case r.Method == http.MethodPost && r.URL.Path == "/api/feedback":
+			l = s.limits.feedback
 		case r.Method != http.MethodGet && r.Method != http.MethodHead && strings.HasPrefix(r.URL.Path, "/api/"):
 			l = s.limits.writes
 		}

@@ -46,6 +46,7 @@ Configuration: copy `.env.example` to `.env` (git-ignored); every setting is lis
 | Auth | `POST /api/auth/register`, `/login`, `/logout` (`{"username", "password"}`) |
 | Profile | `GET /api/me` (null for guests), `PATCH /api/me`, `DELETE /api/me`, `POST /api/me/password` |
 | Master data | `GET /api/master` |
+| Feedback | `POST /api/feedback` (anyone, 5 / 10 min per IP); staff: `GET /api/admin/feedback?status=open\|done\|all`, `PATCH\|DELETE /api/admin/feedback/{id}` |
 | Lineups | `GET /api/lineups?characters=a,b`, `POST /api/lineups`, `GET /api/lineups/{id}`, `GET /api/lineups/{id}/builds?enemyPet=&sort=WIN14\|VOTES\|NEWEST` |
 | Builds | `GET /api/me/builds`, `POST /api/builds`, `GET /api/builds/{id}`, `PUT /api/builds/{id}`, `DELETE /api/builds/{id}` |
 | Votes | `PUT /api/builds/{id}/vote`, `DELETE /api/builds/{id}/vote` |
