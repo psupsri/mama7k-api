@@ -523,9 +523,19 @@ func TestLoginIsRateLimitedPerIP(t *testing.T) {
 
 func TestUsernameRule(t *testing.T) {
 	e := setup(t)
-	for _, name := range []string{"ab", "has space", "ไทย", "dot.name", "this_name_is_way_too_long"} {
+	// at most 5 per test: sign-up is rate-limited per IP
+	for _, name := range []string{"ab", "has space", "ไทย", "plus+sign", "a_name_that_is_31_characters_xy"} {
 		r := e.guest().expect(400, "POST", "/api/auth/register", map[string]string{"username": name, "password": "longenough", "displayName": "x"})
 		eq(t, r.errCode(t), "VALIDATION")
+	}
+}
+
+func TestUsernameAllowsCommonPunctuation(t *testing.T) {
+	e := setup(t)
+	for _, name := range []string{"p.supsri", "night-raid_01", "Someone@Mail.com"} {
+		var u struct{ Username string }
+		e.guest().expect(200, "POST", "/api/auth/register", map[string]string{"username": name, "password": "longenough", "displayName": "x"}).json(t, &u)
+		eq(t, u.Username, strings.ToLower(name))
 	}
 }
 

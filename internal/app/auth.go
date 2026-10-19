@@ -93,7 +93,9 @@ func validatePassword(p string) error {
 	return nil
 }
 
-var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,20}$`)
+// usernamePattern allows what sign-in names commonly use: letters, digits and . _ - @ (so an
+// email-like name works too, though the site never sends email to it).
+var usernamePattern = regexp.MustCompile(`^[a-z0-9._@-]{3,30}$`)
 
 // normalizeUsername lower-cases the name; usernames compare case-insensitively.
 func normalizeUsername(n string) string {
@@ -102,7 +104,7 @@ func normalizeUsername(n string) string {
 
 func validateUsername(n string) error {
 	if !usernamePattern.MatchString(n) {
-		return errValidation("ชื่อผู้ใช้ต้องมี 3–20 ตัว ใช้ได้เฉพาะ a-z, 0-9 และ _")
+		return errValidation("ชื่อผู้ใช้ต้องมี 3–30 ตัว ใช้ได้เฉพาะ a-z, 0-9 และ . _ - @")
 	}
 	return nil
 }

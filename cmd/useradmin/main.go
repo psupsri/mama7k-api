@@ -30,15 +30,15 @@ import (
 )
 
 func main() {
-	username := flag.String("username", "", "account username: 3–20 of a-z, 0-9, _ (required)")
+	username := flag.String("username", "", "account username: 3–30 of a-z, 0-9, . _ - @ (required)")
 	name := flag.String("name", "", "display name for a new account (default: the username)")
 	role := flag.String("role", "MODERATOR", "USER, MODERATOR or SUPER_ADMIN")
 	password := flag.String("password", "", "password for a new account (default: random, printed once)")
 	flag.Parse()
 
 	addr := strings.ToLower(strings.TrimSpace(*username))
-	if !regexp.MustCompile(`^[a-z0-9_]{3,20}$`).MatchString(addr) {
-		log.Fatal("-username is missing or invalid (3–20 of a-z, 0-9, _)")
+	if !regexp.MustCompile(`^[a-z0-9._@-]{3,30}$`).MatchString(addr) {
+		log.Fatal("-username is missing or invalid (3–30 of a-z, 0-9, . _ - @)")
 	}
 	if *role != "USER" && *role != "MODERATOR" && *role != "SUPER_ADMIN" {
 		log.Fatal("-role must be USER, MODERATOR or SUPER_ADMIN")
